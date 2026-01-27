@@ -1,0 +1,288 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>BorrowMyBike – Test Frontend (v3)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- IMPORTANT: Use UMD build so window.supabase exists in a plain HTML file -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 980px; margin: 24px auto; padding: 0 12px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin: 12px 0; }
+    label { display:block; margin: 8px 0 4px; font-weight: 600; }
+    input, select, button { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; }
+    button { cursor:pointer; font-weight: 700; }
+    .small { font-size: 12px; color: #555; }
+    pre { background:#f7f7f7; padding: 12px; border-radius: 10px; overflow:auto; }
+    .ok { color: #0a7a0a; font-weight: 700; }
+    .bad { color: #b00020; font-weight: 700; }
+    code { background:#f2f2f2; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+
+<body>
+  <h1>BorrowMyBike – Test Frontend (v3)</h1>
+  <p class="small">
+    This page works in plain HTML because it uses the Supabase <b>UMD</b> build (global <code>supabase</code>).
+  </p>
+
+  <div class="card">
+    <h2>1) Config</h2>
+    <label>SUPABASE_URL</label>
+    <input id="sbUrl" value="https://yvgwdqeiygzfdhjthilw.supabase.co" />
+
+    <label>SUPABASE_ANON_KEY</label>
+    <input id="sbAnon" placeholder="Paste anon public key (Project Settings → API)" />
+
+    <button id="initBtn">Initialize</button>
+    <div id="initStatus" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h2>2) Login (Borrower)</h2>
+    <label>Email</label>
+    <input id="email" value="class6loaner@gmail.com" />
+    <label>Password</label>
+    <input id="password" type="password" placeholder="Your password" />
+    <button id="loginBtn" disabled>Login</button>
+    <div id="authStatus" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h2>3) Load Bikes + Registries</h2>
+    <button id="loadBtn" disabled>Load Bikes + Registries</button>
+
+    <label>Bike</label>
+    <select id="bikeSelect" disabled></select>
+    <div id="bikeInfo" class="small"></div>
+
+    <label>Registry</label>
+    <select id="registrySelect" disabled></select>
+
+    <label>Date/time (local)</label>
+    <input id="dtLocal" type="datetime-local" />
+
+    <label>Duration (minutes)</label>
+    <input id="duration" type="number" value="30" min="15" step="15" />
+
+    <button id="bookBtn" disabled>Book Now</button>
+    <div id="result" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h2>Debug</h2>
+    <pre id="debug">{}</pre>
+  </div>
+
+<script>
+  let sb = null;
+  let session = null;
+  let bikes = [];
+  let selectedBike = null;
+
+  function setHtml(id, html) { document.getElementById(id).innerHTML = html; }
+  function setDebug(obj) { document.getElementById("debug").textContent = JSON.stringify(obj, null, 2); }
+
+  function nowPlusMinutes(min) {
+    const d = new Date(Date.now() + min * 60 * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  document.getElementById("dtLocal").value = nowPlusMinutes(30);
+
+  // Button wiring (if JS crashes before this runs, nothing will work)
+  document.getElementById("initBtn").addEventListener("click", () => {
+    try {
+      const url = document.getElementById("sbUrl").value.trim();
+      const anon = document.getElementById("sbAnon").value.trim();
+
+      if (!url || !anon) {
+        setHtml("initStatus", `<span class="bad">Missing Supabase URL or anon key.</span>`);
+        return;
+      }
+
+      // IMPORTANT: UMD build exposes global "supabase"
+      if (!window.supabase || !window.supabase.createClient) {
+        throw new Error("Supabase library did not load (window.supabase is missing).");
+      }
+
+      sb = window.supabase.createClient(url, anon);
+
+      setHtml("initStatus", `<span class="ok">Initialized.</span> You can login now.`);
+      document.getElementById("loginBtn").disabled = false;
+
+    } catch (e) {
+      setHtml("initStatus", `<span class="bad">Init failed:</span> ${e.message}`);
+      console.error(e);
+    }
+  });
+
+  document.getElementById("loginBtn").addEventListener("click", async () => {
+    const dbg = { step: "login" };
+    try {
+      if (!sb) throw new Error("Initialize first.");
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      if (!email || !password) throw new Error("Missing email/password.");
+
+      setHtml("authStatus", "Logging in...");
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+
+      session = data.session;
+      dbg.user_id = data.user?.id;
+      setHtml("authStatus", `<span class="ok">Logged in.</span> user_id: <code>${data.user.id}</code>`);
+
+      document.getElementById("loadBtn").disabled = false;
+      setDebug(dbg);
+    } catch (e) {
+      setHtml("authStatus", `<span class="bad">Login failed:</span> ${e.message}`);
+      dbg.error = e.message;
+      setDebug(dbg);
+      console.error(e);
+    }
+  });
+
+  document.getElementById("loadBtn").addEventListener("click", async () => {
+    const dbg = { step: "load" };
+    try {
+      if (!sb || !session?.access_token) throw new Error("Login first.");
+
+      const sbUrl = document.getElementById("sbUrl").value.trim();
+      setHtml("result", "Loading bikes + registries...");
+      setDebug(dbg);
+
+      // Bikes
+      const bikesRes = await fetch(`${sbUrl}/functions/v1/list-bikes?only_ready=true`);
+      const bikesJson = await bikesRes.json();
+      bikes = bikesJson?.bikes || [];
+      dbg.bikes_count = bikes.length;
+      if (!bikes.length) throw new Error("No bikes returned. Check is_active/is_road_test_ready.");
+
+      // Registries (table read)
+      const { data: regs, error: regsErr } = await sb
+        .from("registries")
+        .select("id, name, city")
+        .order("city", { ascending: true });
+
+      dbg.registries_error = regsErr ? regsErr.message : null;
+      dbg.registries_count = regs ? regs.length : 0;
+
+      // Populate bikes
+      const bikeSelect = document.getElementById("bikeSelect");
+      bikeSelect.innerHTML = "";
+      for (const b of bikes) {
+        const opt = document.createElement("option");
+        opt.value = b.id;
+        opt.textContent = `${(b.make||"")} ${(b.model||"")} (${b.city||"?"}) — ${b.id.slice(0,8)}...`;
+        bikeSelect.appendChild(opt);
+      }
+      selectedBike = bikes[0];
+      document.getElementById("bikeInfo").innerHTML = `owner_id: <code>${selectedBike.owner_id}</code>`;
+      bikeSelect.disabled = false;
+      bikeSelect.onchange = () => {
+        selectedBike = bikes.find(x => x.id === bikeSelect.value);
+        document.getElementById("bikeInfo").innerHTML = `owner_id: <code>${selectedBike.owner_id}</code>`;
+      };
+
+      // Populate registries
+      const regSelect = document.getElementById("registrySelect");
+      regSelect.innerHTML = "";
+      if (regsErr) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "Registries blocked by RLS. You must fix policy or hardcode a registry_id.";
+        regSelect.appendChild(opt);
+      } else {
+        for (const r of regs) {
+          const opt = document.createElement("option");
+          opt.value = r.id;
+          opt.textContent = `${r.city || ""} — ${r.name || "Registry"} (${r.id.slice(0,8)}...)`;
+          regSelect.appendChild(opt);
+        }
+      }
+      regSelect.disabled = false;
+
+      document.getElementById("bookBtn").disabled = false;
+      setHtml("result", `<span class="ok">Loaded.</span> Click Book Now.`);
+      setDebug(dbg);
+    } catch (e) {
+      setHtml("result", `<span class="bad">Load failed:</span> ${e.message}`);
+      dbg.error = e.message;
+      setDebug(dbg);
+      console.error(e);
+    }
+  });
+
+  document.getElementById("bookBtn").addEventListener("click", async () => {
+    const dbg = { step: "book" };
+    try {
+      if (!session?.access_token) throw new Error("Login first.");
+      if (!selectedBike?.id) throw new Error("Load bikes first.");
+
+      const sbUrl = document.getElementById("sbUrl").value.trim();
+      const borrowerId = session.user.id;
+      const ownerId = selectedBike.owner_id; // ✅ important fix
+
+      const dtLocal = document.getElementById("dtLocal").value;
+      if (!dtLocal) throw new Error("Pick a date/time.");
+      const bookingDateIso = new Date(dtLocal).toISOString();
+
+      const registryId = document.getElementById("registrySelect").value;
+      if (!registryId) throw new Error("Missing registry_id (registries may be blocked by RLS).");
+
+      const payload = {
+        bike_id: selectedBike.id,
+        borrower_id: borrowerId,
+        owner_id: ownerId,
+        booking_date: bookingDateIso,
+        duration_minutes: parseInt(document.getElementById("duration").value, 10) || 30,
+        registry_id: registryId
+      };
+
+      dbg.url = `${sbUrl}/functions/v1/create-booking-and-payment`;
+      dbg.payload_sent = payload;
+
+      setHtml("result", "Creating booking...");
+
+      const res = await fetch(dbg.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      dbg.http_status = res.status;
+      dbg.response = data;
+      setDebug(dbg);
+
+      // Success paths
+      if (data.checkout_url) {
+        setHtml("result", `<span class="ok">Stripe Checkout URL returned.</span> Redirecting...`);
+        window.location.href = data.checkout_url;
+        return;
+      }
+
+      if (data.used_credit === true) {
+        setHtml("result", `<span class="ok">SUCCESS (Credit booking).</span> booking_id: <code>${data.booking_id}</code>`);
+        return;
+      }
+
+      throw new Error("No checkout_url and not used_credit=true. See debug.");
+    } catch (e) {
+      setHtml("result", `<span class="bad">Booking failed:</span> ${e.message}`);
+      dbg.error = e.message;
+      setDebug(dbg);
+      console.error(e);
+    }
+  });
+</script>
+
+</body>
+</html>

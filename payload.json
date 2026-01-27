@@ -1,0 +1,9 @@
+{
+  "borrower_id": "422caeae-e31b-49fe-9e05-6b2f761779eb",
+  "owner_id": "d0f1aec0-8484-4526-907f-db39a05ae11b",
+  "bike_id": "3cd5fbb5-3800-43ab-841e-201e2da9a49a",
+  "registry_id": "eba58e5d-01b4-4b0c-9b1a-323ea6b2f61e",
+  "booking_date": "2026-01-12T22:15:00Z",
+  "scheduled_start_at": "2026-01-12T22:15:00Z",
+  "duration_minutes": 30
+}

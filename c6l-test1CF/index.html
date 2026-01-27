@@ -1,0 +1,1012 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>BorrowMyBike — Friend Testing</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1120px; margin: 24px auto; padding: 0 12px; background:#fff; }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    h2 { margin: 0 0 8px; }
+    .small { font-size: 12px; color: #555; }
+    .ok { color: #0a7a0a; font-weight: 800; }
+    .bad { color: #b00020; font-weight: 800; }
+    .muted { color:#777; }
+
+    .card { border: 1px solid #e5e5e5; border-radius: 14px; padding: 14px; margin: 12px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+    label { display:block; margin: 8px 0 4px; font-weight: 800; font-size: 13px; }
+    input, select, button { width: 100%; padding: 11px; border-radius: 12px; border: 1px solid #d7d7d7; font-size: 14px; background:#fff; }
+    button { cursor: pointer; font-weight: 900; }
+    .btn { background: #111; color:#fff; border-color:#111; }
+    .btn-secondary { background:#fff; color:#111; border-color:#111; }
+    .btn-danger { background:#b00020; color:#fff; border-color:#b00020; }
+    .btn-disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .notice { border-left: 6px solid #111; padding: 10px 12px; background:#fafafa; border-radius: 12px; margin-top: 10px; }
+    code { background:#f2f2f2; padding: 2px 6px; border-radius: 6px; }
+    pre { background:#f7f7f7; padding: 12px; border-radius: 12px; overflow:auto; max-height: 360px; }
+
+    table { width:100%; border-collapse: collapse; margin-top:10px; }
+    th, td { border-bottom:1px solid #eee; padding: 10px; text-align:left; vertical-align: top; font-size: 12px; }
+    th { font-size: 12px; color:#333; }
+
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background:#f2f2f2; margin-right:6px; margin-bottom:4px; }
+    .actions button { margin: 4px 0; }
+
+    .toggleRow { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .toggleRow input { width:auto; }
+    .sectionTitle { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; }
+    .right { text-align:right; }
+    .warn { background:#fff4e5; border-left: 6px solid #b35c00; padding: 10px 12px; border-radius: 12px; margin-top: 10px; }
+
+    @media (max-width: 900px) { .row, .row3 { grid-template-columns: 1fr; } }
+
+    @media (max-width: 768px) {
+      body { margin: 12px auto; padding: 0 10px; }
+      h1 { font-size: 20px; }
+      h2 { font-size: 16px; }
+      input, select, button { padding: 14px; border-radius: 14px; font-size: 16px; }
+      .card { padding: 12px; border-radius: 14px; }
+      .notice { border-radius: 14px; }
+      pre { max-height: 260px; }
+      table { display: block; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      th, td { white-space: nowrap; font-size: 11px; }
+    }
+    @media (max-width: 420px) {
+      body { padding: 0 8px; }
+      .pill { font-size: 10px; padding: 2px 7px; }
+      pre { padding: 10px; }
+    }
+  </style>
+</head>
+
+<body>
+  <h1>BorrowMyBike — Friend Testing</h1>
+  <div class="small">Sign up, log in, and run through the full flow. (Test payments only.)</div>
+
+  <!-- ACCOUNT -->
+  <div class="card">
+    <h2>Account</h2>
+
+    <div class="row">
+      <div>
+        <label>Email</label>
+        <input id="email" placeholder="email" />
+      </div>
+      <div>
+        <label>Password</label>
+        <input id="password" type="password" placeholder="password" />
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="signupBtn" class="btn btn-disabled" disabled>Sign Up</button>
+      <button id="loginBtn" class="btn-secondary btn-disabled" disabled>Login</button>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="logoutBtn" class="btn-danger btn-disabled" disabled>Logout</button>
+      <button id="refreshBtn" class="btn btn-disabled" disabled>Refresh</button>
+    </div>
+
+    <div id="authStatus" class="small" style="margin-top:8px;"></div>
+    <div id="status" class="small" style="margin-top:6px;"></div>
+    <div id="whoami" class="small muted" style="margin-top:6px;"></div>
+
+    <div class="notice small">
+      <b>Stripe Test Card:</b> <code>4242 4242 4242 4242</code> (Any future expiry, any CVC, any postal)
+    </div>
+  </div>
+
+  <!-- OWNER: ADD BIKE -->
+  <div class="card" id="ownerCard" style="display:none;">
+    <div class="sectionTitle">
+      <div>
+        <h2>Owner — Add My Bike</h2>
+        <div class="small muted">Owners add bikes themselves. After adding, bikes should appear in the booking dropdown (if active).</div>
+      </div>
+      <div class="right">
+        <button id="loadMyBikesBtn" class="btn-secondary" type="button">Refresh My Bikes</button>
+      </div>
+    </div>
+
+    <div class="row3" style="margin-top:10px;">
+      <div><label>Make *</label><input id="bikeMake" placeholder="Honda / Yamaha / KTM..." /></div>
+      <div><label>Model *</label><input id="bikeModel" placeholder="CBR250R / R3 / Duke..." /></div>
+      <div><label>City *</label><input id="bikeCity" placeholder="Calgary / Edmonton..." /></div>
+    </div>
+
+    <div class="row3" style="margin-top:10px;">
+      <div><label>Year *</label><input id="bikeYear" type="number" placeholder="2018" /></div>
+      <div><label>Engine size (cc) *</label><input id="bikeEngine" type="number" placeholder="250" /></div>
+      <div><label>VIN (optional)</label><input id="bikeVIN" placeholder="optional" /></div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <div>
+        <label>
+          <input id="bikeRoadReady" type="checkbox" checked style="width:auto; margin-right:8px; transform: translateY(2px);" />
+          Road test ready (testing)
+        </label>
+      </div>
+      <div style="display:flex; gap:10px; align-items:flex-end;">
+        <button id="addBikeBtn" class="btn" type="button">Add Bike</button>
+      </div>
+    </div>
+
+    <div class="small" style="margin-top:10px;">Add bike response:</div>
+    <pre id="bikeResp">{}</pre>
+
+    <div class="small" style="margin-top:10px;">My bikes:</div>
+    <div id="myBikesWrap" class="small muted">No data yet.</div>
+  </div>
+
+  <!-- BORROWER: CREATE BOOKING -->
+  <div class="card" id="actionsCard" style="display:none;">
+    <div class="sectionTitle">
+      <div>
+        <h2>Borrower — Create Booking</h2>
+        <div class="small">Loads <b>active bikes</b> + <b>active registries</b> from DB.</div>
+      </div>
+      <div class="right">
+        <button id="reloadListsBtn" class="btn-secondary" type="button">Reload bikes/registries</button>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <div>
+        <label>Pick a Bike (active)</label>
+        <select id="bikeSelect"></select>
+        <div class="small" id="bikeMeta"></div>
+      </div>
+      <div>
+        <label>Pick a Registry (active)</label>
+        <select id="registrySelect"></select>
+        <div class="small" id="registryMeta"></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <div>
+        <label>Date/Time (local)</label>
+        <input id="bookingDT" type="datetime-local" />
+      </div>
+      <div>
+        <label>Duration (minutes)</label>
+        <input id="durationMin" type="number" value="30" />
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:10px; padding:12px;">
+      <div class="toggleRow">
+        <label style="margin:0;">
+          <input id="testingPastBooking" type="checkbox" />
+          <b>Testing Mode:</b> create booking using a preset (no waiting)
+        </label>
+        <span class="small muted">Preset keeps you inside check-in window + confirm window.</span>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Testing preset</label>
+          <select id="testingPreset">
+            <option value="normal">Normal (fast): now - 30 min</option>
+            <option value="noshow">No-show (fast): now - 40 min</option>
+          </select>
+          <div class="small muted">No-show: use now - 40, then wait until grace passes (45 mins from scheduled start).</div>
+        </div>
+        <div>
+          <label>Quick set time</label>
+          <button id="setNowPlusBtn" class="btn-secondary" type="button">Set time: now + 20 min</button>
+          <button id="setPresetBtn" class="btn-secondary" type="button" style="margin-top:8px;">Set time to preset (above)</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="bookBtn" class="btn" type="button">Book & Pay</button>
+      <button id="clearRespBtn" class="btn-secondary" type="button">Clear Response</button>
+    </div>
+
+    <div class="small" style="margin-top:10px;">Response:</div>
+    <pre id="bookResp">{}</pre>
+  </div>
+
+  <!-- LIFECYCLE TESTER -->
+  <div class="card" id="lifecycleCard" style="display:none;">
+    <div class="sectionTitle">
+      <div>
+        <h2>Lifecycle Tester — My Bookings</h2>
+        <div class="small muted">No-show buttons appear automatically once eligible. (Backend still enforces rules.)</div>
+      </div>
+      <div class="right" style="min-width:260px;">
+        <button id="loadBookingsBtn" class="btn" type="button">Refresh My Bookings</button>
+      </div>
+    </div>
+
+    <div id="bookingsInfo" class="small" style="margin-top:6px;"></div>
+    <div id="bookingsWrap" style="margin-top:10px;"></div>
+
+    <div class="small" style="margin-top:10px;">Last action response:</div>
+    <pre id="actionResp">{}</pre>
+  </div>
+
+<script>
+  // ====== CONFIG ======
+  const SUPABASE_URL = "https://yvgwdqeiygzfdhjthilw.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2Z3dkcWVpeWd6ZmRoanRoaWx3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMDM2MTYsImV4cCI6MjA4MjY2MzYxNn0.rXlJd3LT_HxJts-yivt6fu5Ie8f3w2eJS1iXZYBa1W4";
+
+  const FN = {
+    createBookingAndPayment: SUPABASE_URL + "/functions/v1/create-booking-and-payment",
+    createOwnerDepositPayment: SUPABASE_URL + "/functions/v1/create-owner-deposit-payment",
+    checkIn: SUPABASE_URL + "/functions/v1/check-in",
+    completeBooking: SUPABASE_URL + "/functions/v1/complete-booking",
+    settleBooking: SUPABASE_URL + "/functions/v1/settle-booking"
+  };
+
+  // UI constant (front-end only; backend remains source of truth)
+  const NO_SHOW_GRACE_MIN = 45;
+
+  let sb = null;
+  let session = null;
+
+  let bikesCache = [];
+  let registriesCache = [];
+
+  let bookingInFlight = false;
+  let lastBookings = [];
+  let bookingsTickTimer = null;
+
+  const $ = (id) => document.getElementById(id);
+
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function shortId(s) {
+    const t = String(s || "");
+    return t ? (t.slice(0, 8) + "…") : "—";
+  }
+
+  function setAuthStatus(msg, ok=null) {
+    if (ok === true) $("authStatus").innerHTML = '<span class="ok">' + escapeHtml(msg) + '</span>';
+    else if (ok === false) $("authStatus").innerHTML = '<span class="bad">' + escapeHtml(msg) + '</span>';
+    else $("authStatus").textContent = msg;
+  }
+
+  function setStatus(msg, ok=null) {
+    if (ok === true) $("status").innerHTML = '<span class="ok">' + escapeHtml(msg) + '</span>';
+    else if (ok === false) $("status").innerHTML = '<span class="bad">' + escapeHtml(msg) + '</span>';
+    else $("status").textContent = msg;
+  }
+
+  function setAuthButtonsEnabled(enabled) {
+    $("signupBtn").disabled = !enabled;
+    $("loginBtn").disabled = !enabled;
+    $("signupBtn").classList.toggle("btn-disabled", !enabled);
+    $("loginBtn").classList.toggle("btn-disabled", !enabled);
+  }
+
+  function showLoggedIn() {
+    $("logoutBtn").disabled = false; $("logoutBtn").classList.remove("btn-disabled");
+    $("refreshBtn").disabled = false; $("refreshBtn").classList.remove("btn-disabled");
+    $("actionsCard").style.display = "block";
+    $("ownerCard").style.display = "block";
+    $("lifecycleCard").style.display = "block";
+    startBookingsTicker();
+  }
+
+  function showLoggedOut() {
+    $("logoutBtn").disabled = true; $("logoutBtn").classList.add("btn-disabled");
+    $("refreshBtn").disabled = true; $("refreshBtn").classList.add("btn-disabled");
+    $("actionsCard").style.display = "none";
+    $("ownerCard").style.display = "none";
+    $("lifecycleCard").style.display = "none";
+    $("whoami").textContent = "";
+    stopBookingsTicker();
+  }
+
+  function mustHaveClient() {
+    if (!sb) throw new Error("Supabase client not initialized. Refresh the page.");
+  }
+
+  function authzHeaders() {
+    if (!session?.access_token) throw new Error("Not logged in.");
+    return { "Authorization": "Bearer " + session.access_token };
+  }
+
+  async function safeJson(res) {
+    const raw = await res.text();
+    try { return { ok: true, json: JSON.parse(raw), raw }; }
+    catch { return { ok: false, json: null, raw }; }
+  }
+
+  function toISOFromLocalDatetime(localStr) { return new Date(localStr).toISOString(); }
+
+  function setDatetimeLocalFromDate(d) {
+    const pad = (n) => String(n).padStart(2, "0");
+    const local = new Date(d.getTime() - d.getTimezoneOffset()*60000);
+    const yyyy = local.getFullYear();
+    const mm = pad(local.getMonth()+1);
+    const dd = pad(local.getDate());
+    const hh = pad(local.getHours());
+    const mi = pad(local.getMinutes());
+    $("bookingDT").value = yyyy + "-" + mm + "-" + dd + "T" + hh + ":" + mi;
+  }
+
+  function getPresetMinutes() {
+    const preset = $("testingPreset").value;
+    if (preset === "noshow") return 40;
+    return 30;
+  }
+
+  function setTimeToPreset() {
+    const mins = getPresetMinutes();
+    const d = new Date(Date.now() - mins * 60000);
+    setDatetimeLocalFromDate(d);
+    setStatus("Booking time set to preset: now - " + mins + " min.", true);
+  }
+
+  function formatLocalTime(d) {
+    try { return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    catch { return d.toISOString(); }
+  }
+
+  function computeNoShowEligibleAt(bookingRow) {
+    const base = bookingRow?.scheduled_start_at || bookingRow?.booking_date;
+    const start = base ? new Date(base) : null;
+    if (!start || isNaN(start.getTime())) return { eligibleAt: null, msLeft: null };
+    const eligibleAt = new Date(start.getTime() + NO_SHOW_GRACE_MIN * 60000);
+    const msLeft = eligibleAt.getTime() - Date.now();
+    return { eligibleAt, msLeft };
+  }
+
+  function updateBikeMeta() {
+    const id = $("bikeSelect").value;
+    const b = bikesCache.find(x => x.id === id);
+    $("bikeMeta").innerHTML = b
+      ? "<b>Loaded:</b> " + bikesCache.length + " bikes<br/>Owner: <code>" + escapeHtml(b.owner_id) + "</code>"
+      : "<b>Loaded:</b> " + bikesCache.length + " bikes";
+  }
+
+  function updateRegistryMeta() {
+    const id = $("registrySelect").value;
+    const r = registriesCache.find(x => x.id === id);
+    $("registryMeta").innerHTML = r
+      ? "<b>Loaded:</b> " + registriesCache.length + " registries<br/>" + escapeHtml(r.address || "")
+      : "<b>Loaded:</b> " + registriesCache.length + " registries";
+  }
+
+  async function loadBikesAndRegistries() {
+    mustHaveClient();
+    try {
+      setStatus("Loading bikes + registries...");
+
+      const bikesRes = await sb
+        .from("bikes")
+        .select("id, owner_id, make, model, year, city, is_active")
+        .eq("is_active", true)
+        .limit(200);
+
+      const regsRes = await sb
+        .from("registries")
+        .select("id, name, city, province, address, is_active")
+        .eq("is_active", true)
+        .order("city", { ascending: true })
+        .limit(200);
+
+      if (bikesRes.error) throw bikesRes.error;
+      if (regsRes.error) throw regsRes.error;
+
+      bikesCache = bikesRes.data || [];
+      registriesCache = regsRes.data || [];
+
+      const bikeSel = $("bikeSelect");
+      const regSel = $("registrySelect");
+      bikeSel.innerHTML = "";
+      regSel.innerHTML = "";
+
+      if (!bikesCache.length) {
+        bikeSel.innerHTML = '<option value="">No active bikes found</option>';
+      } else {
+        for (const b of bikesCache) {
+          const label = (b.make || "Bike") + " " + (b.model || "") + " " + (b.year || "") + " — " + (b.city || "");
+          const opt = document.createElement("option");
+          opt.value = b.id;
+          opt.textContent = label.trim() + " (id: " + String(b.id).slice(0, 8) + "...)";
+          bikeSel.appendChild(opt);
+        }
+      }
+
+      if (!registriesCache.length) {
+        regSel.innerHTML = '<option value="">No active registries found</option>';
+      } else {
+        for (const r of registriesCache) {
+          const label = (r.name || "Registry") + " — " + (r.city || "") + " " + (r.province || "");
+          const opt = document.createElement("option");
+          opt.value = r.id;
+          opt.textContent = label.trim() + " (id: " + String(r.id).slice(0, 8) + "...)";
+          regSel.appendChild(opt);
+        }
+      }
+
+      updateBikeMeta();
+      updateRegistryMeta();
+      setStatus("Lists loaded ✅ (bikes=" + bikesCache.length + ", registries=" + registriesCache.length + ")", true);
+    } catch (e) {
+      console.error(e);
+      setStatus("Failed to load lists: " + e.message, false);
+      $("bikeSelect").innerHTML = '<option value="">(error loading bikes)</option>';
+      $("registrySelect").innerHTML = '<option value="">(error loading registries)</option>';
+    }
+  }
+
+  $("reloadListsBtn").addEventListener("click", loadBikesAndRegistries);
+
+  $("refreshBtn").addEventListener("click", async () => {
+    await loadBikesAndRegistries();
+    await loadMyBikes();
+    await loadMyBookings();
+  });
+
+  $("bikeSelect").addEventListener("change", updateBikeMeta);
+  $("registrySelect").addEventListener("change", updateRegistryMeta);
+
+  $("setNowPlusBtn").addEventListener("click", () => {
+    const d = new Date(Date.now() + 20 * 60000);
+    setDatetimeLocalFromDate(d);
+    setStatus("Booking time set to now + 20 minutes.", true);
+  });
+
+  $("setPresetBtn").addEventListener("click", setTimeToPreset);
+  $("clearRespBtn").addEventListener("click", () => { $("bookResp").textContent = "{}"; });
+
+  async function loadMyBikes() {
+    mustHaveClient();
+    if (!session?.user?.id) return;
+
+    const q = await sb
+      .from("bikes")
+      .select("id, make, model, year, engine_size, city, is_active, is_road_test_ready")
+      .eq("owner_id", session.user.id)
+      .limit(50);
+
+    if (q.error) {
+      $("myBikesWrap").innerHTML = '<span class="bad">Error loading my bikes:</span> ' + escapeHtml(q.error.message);
+      return;
+    }
+
+    const rows = (q.data || []);
+    if (!rows.length) {
+      $("myBikesWrap").innerHTML = '<span class="muted">No bikes yet. Add one above.</span>';
+      return;
+    }
+
+    $("myBikesWrap").innerHTML =
+      '<table><thead><tr><th>id</th><th>bike</th><th>city</th><th>active</th><th>road ready</th></tr></thead><tbody>' +
+      rows.map(b => (
+        "<tr>" +
+          "<td><code>" + escapeHtml(String(b.id).slice(0,8)) + "</code></td>" +
+          "<td>" + escapeHtml((b.make||"") + " " + (b.model||"") + " " + (b.year||"") + " (" + (b.engine_size||"") + "cc)") + "</td>" +
+          "<td>" + escapeHtml(b.city||"") + "</td>" +
+          "<td>" + (b.is_active ? "YES" : "NO") + "</td>" +
+          "<td>" + (b.is_road_test_ready ? "YES" : "NO") + "</td>" +
+        "</tr>"
+      )).join("") +
+      "</tbody></table>";
+  }
+
+  $("loadMyBikesBtn").addEventListener("click", loadMyBikes);
+
+  $("addBikeBtn").addEventListener("click", async () => {
+    try {
+      mustHaveClient();
+      if (!session?.user?.id) throw new Error("Not logged in.");
+
+      const make = $("bikeMake").value.trim();
+      const model = $("bikeModel").value.trim();
+      const city = $("bikeCity").value.trim();
+      const year = Number($("bikeYear").value);
+      const engine_size = Number($("bikeEngine").value);
+      const vin = $("bikeVIN").value.trim() || null;
+      const is_road_test_ready = $("bikeRoadReady").checked;
+
+      if (!make || !model || !city) throw new Error("Make, model, and city are required.");
+      if (!year || year < 1900) throw new Error("Year is required (e.g., 2018).");
+      if (!engine_size || engine_size < 50) throw new Error("Engine size is required (e.g., 250).");
+
+      const insertRow = {
+        owner_id: session.user.id,
+        make,
+        model,
+        year,
+        engine_size,
+        city,
+        is_active: true,
+        is_road_test_ready,
+        documents_attested: false,
+        vin
+      };
+
+      setStatus("Adding bike...");
+      const ins = await sb.from("bikes").insert(insertRow).select("id").single();
+      $("bikeResp").textContent = JSON.stringify({ inserted: insertRow, result: ins }, null, 2);
+
+      if (ins.error) {
+        setStatus("Add bike failed: " + ins.error.message, false);
+        return;
+      }
+
+      setStatus("Bike added ✅ Reloading lists…", true);
+
+      $("bikeMake").value = "";
+      $("bikeModel").value = "";
+      $("bikeYear").value = "";
+      $("bikeEngine").value = "";
+      $("bikeVIN").value = "";
+
+      await loadMyBikes();
+      await loadBikesAndRegistries();
+    } catch (e) {
+      console.error(e);
+      setStatus("Add bike error: " + e.message, false);
+    }
+  });
+
+  $("bookBtn").addEventListener("click", async () => {
+    try {
+      if (bookingInFlight) return;
+      bookingInFlight = true;
+      $("bookBtn").classList.add("btn-disabled");
+      $("bookBtn").disabled = true;
+
+      mustHaveClient();
+
+      const bike_id = $("bikeSelect").value;
+      const registry_id = $("registrySelect").value;
+      const duration_minutes = Number($("durationMin").value || 30);
+
+      if (!bike_id) throw new Error("Pick a bike.");
+      if (!registry_id) throw new Error("Pick a registry.");
+
+      const bike = bikesCache.find(b => b.id === bike_id);
+      if (!bike?.owner_id) throw new Error("Selected bike missing owner_id.");
+
+      const usePreset = $("testingPastBooking").checked;
+
+      let booking_date;
+      if (usePreset) {
+        const mins = getPresetMinutes();
+        booking_date = new Date(Date.now() - mins * 60000).toISOString();
+      } else {
+        const dtLocal = $("bookingDT").value;
+        if (!dtLocal) throw new Error("Pick a date/time.");
+        booking_date = toISOFromLocalDatetime(dtLocal);
+      }
+
+      const payload = {
+        bike_id,
+        borrower_id: session.user.id,
+        owner_id: bike.owner_id,
+        booking_date,
+        duration_minutes,
+        registry_id
+      };
+
+      setStatus("Creating booking... " + (usePreset ? "(testing preset)" : ""));
+      const res = await fetch(FN.createBookingAndPayment, {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, authzHeaders()),
+        body: JSON.stringify(payload)
+      });
+
+      const parsed = await safeJson(res);
+      $("bookResp").textContent = JSON.stringify(
+        { http_status: res.status, ok: res.ok, url: FN.createBookingAndPayment, payload_sent: payload, response: parsed.ok ? parsed.json : parsed.raw },
+        null, 2
+      );
+
+      if (!res.ok) { setStatus("Booking failed (see response).", false); return; }
+
+      const json = parsed.json;
+      if (json?.checkout_url) {
+        setStatus("Redirecting to Stripe Checkout…", true);
+        window.location.href = json.checkout_url;
+        return;
+      }
+
+      if (json?.used_credit === true) {
+        setStatus("Booking created with credit ✅ (no Stripe checkout needed).", true);
+        await loadMyBookings();
+        return;
+      }
+
+      setStatus("Booking created, but no checkout_url returned. Check response.", false);
+    } catch (e) {
+      console.error(e);
+      setStatus("Booking error: " + e.message, false);
+    } finally {
+      bookingInFlight = false;
+      $("bookBtn").classList.remove("btn-disabled");
+      $("bookBtn").disabled = false;
+    }
+  });
+
+  function pill(label, on) {
+    const style = on ? "background:#e9ffe9;color:#0a7a0a;" : "background:#f2f2f2;color:#555;";
+    return '<span class="pill" style="' + style + '">' + escapeHtml(label) + ":" + (on ? "YES" : "NO") + "</span>";
+  }
+
+  async function postFn(url, payload) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: Object.assign({ "Content-Type": "application/json" }, authzHeaders()),
+      body: JSON.stringify(payload)
+    });
+    const parsed = await safeJson(res);
+    const body = parsed.ok ? parsed.json : parsed.raw;
+    $("actionResp").textContent = JSON.stringify({ http_status: res.status, ok: res.ok, url, payload_sent: payload, response: body }, null, 2);
+    return { res, body };
+  }
+
+  async function payOwnerDeposit(booking_id) {
+    setStatus("Owner deposit checkout…");
+    const { res, body } = await postFn(FN.createOwnerDepositPayment, { booking_id });
+    if (!res.ok) { setStatus("Owner deposit failed (see response).", false); return; }
+    if (body?.checkout_url) {
+      setStatus("Redirecting to Stripe Checkout (owner deposit)…", true);
+      window.location.href = body.checkout_url;
+      return;
+    }
+    setStatus("Owner deposit succeeded but no checkout_url returned. Check response.", false);
+  }
+
+  async function checkIn(booking_id, actor) {
+    setStatus("Check-in… (" + actor + ")");
+    const { res, body } = await postFn(FN.checkIn, { booking_id, actor });
+    if (!res.ok) {
+      setStatus("Check-in failed: " + (body?.error || "see response"), false);
+      return;
+    }
+    setStatus("Check-in saved ✅", true);
+    await loadMyBookings();
+  }
+
+  async function confirmCompletedAndReturned(booking_id, actor) {
+    setStatus("Confirm: Test Completed & Bike Returned… (" + actor + ")");
+    const { res, body } = await postFn(FN.completeBooking, { booking_id, actor });
+    if (!res.ok) {
+      setStatus("Confirmation blocked: " + (body?.error || "see response"), false);
+      return;
+    }
+    setStatus("Confirmation saved ✅ (backend may auto-settle)", true);
+    await loadMyBookings();
+  }
+
+  async function settleAction(booking_id, action) {
+    setStatus("Settlement action… (" + action + ")");
+    const { res, body } = await postFn(FN.settleBooking, { booking_id, action });
+    if (!res.ok) {
+      setStatus("Action blocked: " + (body?.error || "see response"), false);
+      return;
+    }
+    setStatus("Action succeeded ✅", true);
+    await loadMyBookings();
+  }
+
+  function isMeBorrower(b){ return b?.borrower_id === session?.user?.id; }
+  function isMeOwner(b){ return b?.owner_id === session?.user?.id; }
+
+  function renderBookings(bookings) {
+    if (!Array.isArray(bookings) || bookings.length === 0) {
+      $("bookingsWrap").innerHTML = '<div class="muted">No bookings found for this user.</div>';
+      return;
+    }
+
+    const nowMs = Date.now();
+
+    const rows = bookings.map(b => {
+      const idShort = String(b.id || "").slice(0, 8);
+
+      const meIsOwner = isMeOwner(b);
+      const meIsBorrower = isMeBorrower(b);
+
+      const roleBadge = meIsOwner && meIsBorrower
+        ? '<span class="pill" style="background:#e5f0ff;color:#0b3a7a;">YOU ARE: OWNER + BORROWER</span>'
+        : (meIsOwner
+          ? '<span class="pill" style="background:#e5f0ff;color:#0b3a7a;">YOU ARE: OWNER</span>'
+          : (meIsBorrower
+            ? '<span class="pill" style="background:#e5f0ff;color:#0b3a7a;">YOU ARE: BORROWER</span>'
+            : '<span class="pill" style="background:#fff4e5;color:#b35c00;">WARNING: You are NOT owner/borrower on this booking</span>'
+          )
+        );
+
+      const idLine =
+        '<div class="small muted">' +
+          'Owner: <code>' + escapeHtml(shortId(b.owner_id)) + '</code> &nbsp; ' +
+          'Borrower: <code>' + escapeHtml(shortId(b.borrower_id)) + '</code>' +
+        '</div>';
+
+      const flags =
+        pill("borrower_paid", !!b.borrower_paid) +
+        pill("owner_deposit_paid", !!b.owner_deposit_paid) +
+        pill("b_ci", !!b.borrower_checked_in) +
+        pill("o_ci", !!b.owner_checked_in) +
+        pill("b_returned", !!b.borrower_confirmed_complete) +
+        pill("o_returned", !!b.owner_confirmed_complete) +
+        pill("completed", !!b.completed) +
+        pill("settled", !!b.settled) +
+        (b.cancelled ? '<span class="pill" style="background:#ffe9ee;color:#b00020;">cancelled:YES</span>' : "");
+
+      const canPayDeposit = meIsOwner && !b.cancelled && !b.owner_deposit_paid;
+
+      // Backend requires both paid; we keep UI aligned with backend.
+      const canBCI = meIsBorrower && !b.cancelled && !!b.borrower_paid && !!b.owner_deposit_paid && !b.borrower_checked_in;
+      const canOCI = meIsOwner && !b.cancelled && !!b.borrower_paid && !!b.owner_deposit_paid && !b.owner_checked_in;
+
+      const bConfirmed = !!b.borrower_confirmed_complete;
+      const oConfirmed = !!b.owner_confirmed_complete;
+
+      const canBReturned = meIsBorrower && !b.cancelled && !!b.borrower_paid && !!b.owner_deposit_paid && !bConfirmed;
+      const canOReturned = meIsOwner && !b.cancelled && !!b.borrower_paid && !!b.owner_deposit_paid && !oConfirmed;
+
+      const borrowerConfirmLabel = bConfirmed ? "Borrower: Confirmed ✅" : "Borrower: Test Completed & Bike Returned";
+      const ownerConfirmLabel = oConfirmed ? "Owner: Confirmed ✅" : "Owner: Test Completed & Bike Returned";
+
+      const { eligibleAt, msLeft } = computeNoShowEligibleAt(b);
+      const eligibleStr = eligibleAt ? formatLocalTime(eligibleAt) : "—";
+      const eligible = (eligibleAt && nowMs >= eligibleAt.getTime());
+
+      // Show no-show buttons once both paid (so testers can see countdown), unlock when eligible AND check-in rule satisfied.
+      const borrowerNoShowVisible = meIsBorrower && !b.cancelled && !b.settled && !!b.borrower_paid && !!b.owner_deposit_paid;
+      const ownerNoShowVisible = meIsOwner && !b.cancelled && !b.settled && !!b.borrower_paid && !!b.owner_deposit_paid;
+
+      const borrowerCanClaimOwnerNoShow =
+        borrowerNoShowVisible &&
+        !!b.borrower_checked_in &&
+        !b.owner_checked_in &&
+        eligible;
+
+      const ownerCanClaimBorrowerNoShow =
+        ownerNoShowVisible &&
+        !!b.owner_checked_in &&
+        !b.borrower_checked_in &&
+        eligible;
+
+      const borrowerNoShowLabel = borrowerCanClaimOwnerNoShow
+        ? "Claim Owner No-Show (Borrower)"
+        : "Claim Owner No-Show (Eligible " + eligibleStr + ")";
+
+      const ownerNoShowLabel = ownerCanClaimBorrowerNoShow
+        ? "Claim Borrower No-Show (Owner)"
+        : "Claim Borrower No-Show (Eligible " + eligibleStr + ")";
+
+      const countdownLine = (eligibleAt && !eligible)
+        ? '<div class="small muted">No-show countdown: <b>' + Math.max(0, Math.ceil(msLeft/60000)) + ' min</b> (eligible at ' + escapeHtml(eligibleStr) + ')</div>'
+        : (eligibleAt ? '<div class="small muted">No-show eligible now ✅ (eligible at ' + escapeHtml(eligibleStr) + ')</div>' : "");
+
+      const warningIfNotParticipant = (!meIsOwner && !meIsBorrower)
+        ? '<div class="warn small"><b>Heads up:</b> You are logged into a user that is not owner/borrower for this booking. Actions will fail with “Only owner/borrower can …”.</div>'
+        : "";
+
+      return (
+        "<tr>" +
+          "<td><b>" + escapeHtml(idShort) + "</b><div style='margin-top:6px;'>" + roleBadge + "</div>" + idLine + "</td>" +
+          "<td class='muted'>" + escapeHtml(b.booking_date || "") + "<br/><span class='small muted'>scheduled_start_at: " + escapeHtml(b.scheduled_start_at || "—") + "</span></td>" +
+          "<td>" + flags + countdownLine + warningIfNotParticipant + "</td>" +
+          "<td class='actions'>" +
+
+            "<button class='" + (canPayDeposit ? "btn" : "btn btn-disabled") + "' " + (canPayDeposit ? "" : "disabled") +
+              " onclick=\"window._payDeposit('" + b.id + "')\">Pay Owner Deposit</button>" +
+
+            "<button class='" + (canBCI ? "btn-secondary" : "btn-secondary btn-disabled") + "' " + (canBCI ? "" : "disabled") +
+              " onclick=\"window._checkIn('" + b.id + "','borrower')\">Borrower Check-in</button>" +
+
+            "<button class='" + (canOCI ? "btn-secondary" : "btn-secondary btn-disabled") + "' " + (canOCI ? "" : "disabled") +
+              " onclick=\"window._checkIn('" + b.id + "','owner')\">Owner Check-in</button>" +
+
+            "<button class='" + (canBReturned ? "btn-secondary" : "btn-secondary btn-disabled") + "' " + (canBReturned ? "" : "disabled") +
+              " onclick=\"window._confirmReturned('" + b.id + "','borrower')\">" + escapeHtml(borrowerConfirmLabel) + "</button>" +
+
+            "<button class='" + (canOReturned ? "btn-secondary" : "btn-secondary btn-disabled") + "' " + (canOReturned ? "" : "disabled") +
+              " onclick=\"window._confirmReturned('" + b.id + "','owner')\">" + escapeHtml(ownerConfirmLabel) + "</button>" +
+
+            "<hr style='border:none;border-top:1px solid #eee;margin:10px 0;' />" +
+            "<div class='small muted' style='margin-bottom:6px;'><b>No-show actions</b> (auto-unlock after grace)</div>" +
+
+            (borrowerNoShowVisible
+              ? "<button class='" + (borrowerCanClaimOwnerNoShow ? "btn-danger" : "btn-danger btn-disabled") + "' " + (borrowerCanClaimOwnerNoShow ? "" : "disabled") +
+                " onclick=\"window._settleAction('" + b.id + "','report_owner_no_show')\">" + escapeHtml(borrowerNoShowLabel) + "</button>"
+              : ""
+            ) +
+
+            (ownerNoShowVisible
+              ? "<button class='" + (ownerCanClaimBorrowerNoShow ? "btn-danger" : "btn-danger btn-disabled") + "' " + (ownerCanClaimBorrowerNoShow ? "" : "disabled") +
+                " onclick=\"window._settleAction('" + b.id + "','report_borrower_no_show')\">" + escapeHtml(ownerNoShowLabel) + "</button>"
+              : ""
+            ) +
+
+          "</td>" +
+        "</tr>"
+      );
+    }).join("");
+
+    $("bookingsWrap").innerHTML =
+      "<table>" +
+        "<thead><tr><th>booking</th><th>date</th><th>flags</th><th>actions</th></tr></thead>" +
+        "<tbody>" + rows + "</tbody>" +
+      "</table>";
+  }
+
+  async function loadMyBookings() {
+    mustHaveClient();
+    if (!session?.user?.id) return;
+
+    $("bookingsInfo").textContent = "Loading…";
+
+    const orClause = "borrower_id.eq." + session.user.id + ",owner_id.eq." + session.user.id;
+
+    const q = await sb
+      .from("bookings")
+      .select("*")
+      .or(orClause)
+      .order("booking_date", { ascending: false })
+      .limit(50);
+
+    if (q.error) {
+      $("bookingsInfo").innerHTML = '<span class="bad">Failed:</span> ' + escapeHtml(q.error.message);
+      $("bookingsWrap").innerHTML = "";
+      lastBookings = [];
+      return;
+    }
+
+    lastBookings = q.data || [];
+    $("bookingsInfo").innerHTML = '<span class="ok">Loaded ✅</span> ' + lastBookings.length + " booking(s)";
+    renderBookings(lastBookings);
+  }
+
+  function startBookingsTicker() {
+    stopBookingsTicker();
+    bookingsTickTimer = setInterval(() => {
+      if (session?.user?.id && lastBookings?.length) renderBookings(lastBookings);
+    }, 5000);
+  }
+
+  function stopBookingsTicker() {
+    if (bookingsTickTimer) clearInterval(bookingsTickTimer);
+    bookingsTickTimer = null;
+  }
+
+  window._payDeposit = (id) => payOwnerDeposit(id);
+  window._checkIn = (id, actor) => checkIn(id, actor);
+  window._confirmReturned = (id, actor) => confirmCompletedAndReturned(id, actor);
+  window._settleAction = (id, action) => settleAction(id, action);
+
+  $("loadBookingsBtn").addEventListener("click", loadMyBookings);
+
+  $("signupBtn").addEventListener("click", async () => {
+    try {
+      mustHaveClient();
+      const email = $("email").value.trim();
+      const password = $("password").value;
+      if (!email || !password) throw new Error("Enter email + password.");
+
+      setAuthStatus("Signing up...");
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if (error) throw error;
+
+      if (data?.session) {
+        session = data.session;
+        setAuthStatus("Signed up and logged in ✅", true);
+        $("whoami").textContent = "Logged in as: " + session.user.email + " (" + session.user.id + ")";
+        showLoggedIn();
+        await loadBikesAndRegistries();
+        await loadMyBikes();
+        await loadMyBookings();
+      } else {
+        setAuthStatus("Signed up ✅ Now click Login.", true);
+      }
+    } catch (e) {
+      console.error(e);
+      setAuthStatus("Sign up failed: " + e.message, false);
+    }
+  });
+
+  $("loginBtn").addEventListener("click", async () => {
+    try {
+      mustHaveClient();
+      const email = $("email").value.trim();
+      const password = $("password").value;
+      if (!email || !password) throw new Error("Enter email + password.");
+
+      setAuthStatus("Logging in...");
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+
+      session = data.session;
+      setAuthStatus("Logged in ✅", true);
+      $("whoami").textContent = "Logged in as: " + session.user.email + " (" + session.user.id + ")";
+      showLoggedIn();
+      await loadBikesAndRegistries();
+      await loadMyBikes();
+      await loadMyBookings();
+    } catch (e) {
+      console.error(e);
+      setAuthStatus("Login failed: " + e.message, false);
+    }
+  });
+
+  $("logoutBtn").addEventListener("click", async () => {
+    try {
+      mustHaveClient();
+      await sb.auth.signOut();
+      session = null;
+      setAuthStatus("Logged out.", true);
+      setStatus("");
+      showLoggedOut();
+      $("bookResp").textContent = "{}";
+      $("bikeResp").textContent = "{}";
+      $("actionResp").textContent = "{}";
+      $("myBikesWrap").innerHTML = '<span class="muted">No data yet.</span>';
+      $("bookingsWrap").innerHTML = "";
+      $("bookingsInfo").textContent = "";
+      lastBookings = [];
+    } catch (e) {
+      console.error(e);
+      setAuthStatus("Logout failed: " + e.message, false);
+    }
+  });
+
+  $("refreshBtn").addEventListener("click", async () => {
+    await loadBikesAndRegistries();
+    await loadMyBikes();
+    await loadMyBookings();
+  });
+
+  async function init() {
+    try {
+      setAuthButtonsEnabled(false);
+
+      if (!window.supabase || !window.supabase.createClient) {
+        setAuthStatus("Supabase JS library failed to load. Refresh the page.", false);
+        return;
+      }
+
+      if (!SUPABASE_ANON_KEY.trim()) {
+        setAuthStatus("Missing Supabase ANON key.", false);
+        return;
+      }
+
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      setAuthButtonsEnabled(true);
+
+      setDatetimeLocalFromDate(new Date(Date.now() + 20 * 60000));
+
+      const { data } = await sb.auth.getSession();
+      if (data?.session) {
+        session = data.session;
+        setAuthStatus("Session restored ✅", true);
+        $("whoami").textContent = "Logged in as: " + session.user.email + " (" + session.user.id + ")";
+        showLoggedIn();
+        await loadBikesAndRegistries();
+        await loadMyBikes();
+        await loadMyBookings();
+      } else {
+        setAuthStatus("Ready ✅ Create an account or log in.", true);
+        showLoggedOut();
+      }
+    } catch (e) {
+      console.error(e);
+      setAuthStatus("Init failed: " + e.message, false);
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>BorrowMyBike – Owner Dashboard (Test)</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 20px; }
+      button { padding: 8px 12px; cursor: pointer; margin: 2px 0; }
+      input { padding: 8px; width: 720px; max-width: 95%; }
+      label { display:block; margin-top: 12px; font-weight: bold; }
+      pre { background: #f4f4f4; padding: 10px; max-height: 340px; overflow: auto; }
+      .box { border: 1px solid #ddd; padding: 12px; border-radius: 8px; margin-top: 12px; }
+      table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+      th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px; vertical-align: top; }
+      th { background: #fafafa; }
+      .yes { color: #0a7a0a; font-weight: bold; }
+      .no { color: #b00020; font-weight: bold; }
+      .btn-disabled { opacity: 0.5; cursor: not-allowed; }
+      .tag { display:inline-block; padding:2px 6px; border-radius: 6px; font-size: 12px; background:#eee; }
+    </style>
+  </head>
+
+  <body>
+    <h1>Owner Dashboard (Test)</h1>
+
+    <div class="box">
+      <label>Supabase URL</label>
+      <input id="supabaseUrl" value="https://yvgwdqeiygzfdhjthilw.supabase.co" />
+
+      <label>Supabase anon key</label>
+      <input id="supabaseAnon" value="PASTE_ANON_KEY_HERE" />
+
+      <label>Owner ID (uuid)</label>
+      <input id="ownerId" placeholder="paste owner uuid here" />
+
+      <button onclick="loadOwnerBookings()">Load Owner Bookings</button>
+
+      <h3>Status</h3>
+      <pre id="statusOutput">Waiting...</pre>
+    </div>
+
+    <div class="box">
+      <h2>Bookings</h2>
+      <div id="tableWrap">No data loaded yet.</div>
+
+      <h2>Raw JSON</h2>
+      <pre id="rawOutput">—</pre>
+    </div>
+
+    <script>
+      function setStatus(obj) {
+        document.getElementById("statusOutput").textContent =
+          typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+      }
+      function setRaw(obj) {
+        document.getElementById("rawOutput").textContent =
+          typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+      }
+      function getConfig() {
+        return {
+          SUPABASE_URL: document.getElementById("supabaseUrl").value.trim(),
+          SUPABASE_ANON_KEY: document.getElementById("supabaseAnon").value.trim(),
+          owner_id: document.getElementById("ownerId").value.trim(),
+        };
+      }
+      function yesNo(v) {
+        return v ? `<span class="yes">YES</span>` : `<span class="no">NO</span>`;
+      }
+      function text(v) {
+        return (v === null || v === undefined || v === "") ? "" : String(v);
+      }
+
+      function canPayDeposit(b) {
+        return !!b.borrower_paid && !b.owner_deposit_paid && !b.cancelled && !b.completed;
+      }
+      function canOwnerConfirmComplete(b) {
+        return !!b.borrower_paid && !!b.owner_deposit_paid && !b.cancelled && !b.owner_confirmed_complete;
+      }
+      function canOwnerCheckIn(b) {
+        // UI hint only; backend enforces time + payments
+        return !b.cancelled && !b.owner_checked_in;
+      }
+      function canReportBorrowerNoShow(b) {
+        return !b.cancelled && !!b.owner_checked_in && !b.borrower_checked_in && !b.treat_as_borrower_no_show;
+      }
+
+      // ✅ New: settle should only be possible when booking is completed or a no-show flag is set, and not already settled
+      function isSettleEligible(b) {
+        const ready =
+          !!b.completed ||
+          !!b.treat_as_owner_no_show ||
+          !!b.treat_as_borrower_no_show;
+        return ready && !b.cancelled && !b.settled;
+      }
+
+      function renderTable(bookings) {
+        if (!bookings || !bookings.length) {
+          document.getElementById("tableWrap").innerHTML = "No bookings returned.";
+          return;
+        }
+
+        const rows = bookings.map(b => {
+          const payBtn = canPayDeposit(b)
+            ? `<button onclick="payDeposit('${b.id}')">Pay deposit ($150)</button>`
+            : `<button class="btn-disabled" disabled>Pay deposit</button>`;
+
+          const checkInBtn = canOwnerCheckIn(b)
+            ? `<button onclick="checkIn('${b.id}','owner')">I’m here (Owner check-in)</button>`
+            : `<button class="btn-disabled" disabled>Checked in</button>`;
+
+          const confirmBtn = canOwnerConfirmComplete(b)
+            ? `<button onclick="confirmComplete('${b.id}','owner')">Owner confirms complete ✅</button>`
+            : `<button class="btn-disabled" disabled>Owner confirm</button>`;
+
+          const borrowerNoShowBtn = canReportBorrowerNoShow(b)
+            ? `<button onclick="reportBorrowerNoShow('${b.id}')">Report borrower no-show ❌</button>`
+            : `<button class="btn-disabled" disabled>Report borrower no-show</button>`;
+
+          const settleBtn = isSettleEligible(b)
+            ? `<button onclick="settleBooking('${b.id}')">Settle booking 💰</button>`
+            : `<button class="btn-disabled" disabled>Settle</button>`;
+
+          const settledTag = b.settled
+            ? `<span class="tag">settled ✅ (${text(b.settlement_outcome)})</span><br/><span class="tag">${text(b.settled_at)}</span>`
+            : `<span class="tag">not settled</span>`;
+
+          return `
+            <tr>
+              <td>${b.id}</td>
+              <td>${text(b.booking_date)}</td>
+              <td>${yesNo(b.borrower_paid)}</td>
+              <td>${yesNo(b.owner_deposit_paid)}</td>
+              <td>${yesNo(b.owner_checked_in)}</td>
+              <td>${yesNo(b.borrower_checked_in)}</td>
+              <td>${yesNo(b.owner_confirmed_complete)}</td>
+              <td>${yesNo(b.borrower_confirmed_complete)}</td>
+              <td>${yesNo(b.completed)}</td>
+              <td>${yesNo(b.treat_as_owner_no_show)}</td>
+              <td>${yesNo(b.treat_as_borrower_no_show)}</td>
+              <td>${settledTag}</td>
+              <td>${payBtn}<br/>${checkInBtn}<br/>${confirmBtn}<br/>${borrowerNoShowBtn}<br/>${settleBtn}</td>
+            </tr>
+          `;
+        }).join("");
+
+        document.getElementById("tableWrap").innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>booking_id</th>
+                <th>booking_date</th>
+                <th>borrower_paid</th>
+                <th>owner_deposit_paid</th>
+                <th>owner_checked_in</th>
+                <th>borrower_checked_in</th>
+                <th>owner_confirmed</th>
+                <th>borrower_confirmed</th>
+                <th>completed</th>
+                <th>owner_no_show</th>
+                <th>borrower_no_show</th>
+                <th>settlement</th>
+                <th>actions</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        `;
+      }
+
+      async function loadOwnerBookings() {
+        const { SUPABASE_URL, SUPABASE_ANON_KEY, owner_id } = getConfig();
+        if (!owner_id) { alert("Paste Owner ID"); return; }
+        setStatus("Loading owner bookings...");
+        const url = `${SUPABASE_URL}/functions/v1/get-owner-bookings?owner_id=${encodeURIComponent(owner_id)}`;
+        const res = await fetch(url, { method: "GET", headers: { "Authorization": `Bearer ${SUPABASE_ANON_KEY}` } });
+        const data = await res.json();
+        setRaw(data);
+        renderTable(data.bookings || []);
+        setStatus("Done ✅");
+      }
+
+      window.payDeposit = async (booking_id) => {
+        const { SUPABASE_URL } = getConfig();
+        setStatus(`Creating deposit checkout... booking_id=${booking_id}`);
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/create-owner-deposit-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ booking_id })
+        });
+        const data = await res.json();
+        setRaw(data);
+        if (!data.checkout_url) { alert("No checkout_url. See Raw JSON."); return; }
+        window.location.href = data.checkout_url;
+      };
+
+      window.checkIn = async (booking_id, actor) => {
+        const { SUPABASE_URL } = getConfig();
+        setStatus(`Checking in... booking_id=${booking_id}, actor=${actor}`);
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/check-in`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ booking_id, actor })
+        });
+        const data = await res.json();
+        setRaw(data);
+        if (data.error) { alert("Check-in error. See Raw JSON."); return; }
+        alert("Checked in ✅");
+        await loadOwnerBookings();
+      };
+
+      window.confirmComplete = async (booking_id, actor) => {
+        const { SUPABASE_URL } = getConfig();
+        setStatus(`Confirming complete... booking_id=${booking_id}, actor=${actor}`);
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/complete-booking`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ booking_id, actor })
+        });
+        const data = await res.json();
+        setRaw(data);
+        if (data.error) { alert("Error. See Raw JSON."); return; }
+        alert("Saved ✅");
+        await loadOwnerBookings();
+      };
+
+      window.reportBorrowerNoShow = async (booking_id) => {
+        const { SUPABASE_URL } = getConfig();
+        if (!confirm("Report borrower no-show? Backend enforces check-in + 15 min grace.")) return;
+        setStatus(`Reporting borrower no-show... booking_id=${booking_id}`);
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/settle-booking`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ booking_id, action: "report_borrower_no_show" })
+        });
+        const data = await res.json();
+        setRaw(data);
+        if (data.error) { alert("No-show rejected (good). See Raw JSON."); return; }
+        alert("Borrower no-show flagged ✅");
+        await loadOwnerBookings();
+      };
+
+      window.settleBooking = async (booking_id) => {
+        const { SUPABASE_URL } = getConfig();
+        setStatus(`Settling... booking_id=${booking_id}`);
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/settle-booking`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ booking_id, action: "settle" })
+        });
+        const data = await res.json();
+        setRaw(data);
+        if (data.error) { alert("Not settled. See Raw JSON."); return; }
+        alert("Settlement attempted ✅ (see Raw JSON)");
+        await loadOwnerBookings();
+      };
+    </script>
+  </body>
+</html>
