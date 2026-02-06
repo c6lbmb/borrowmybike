@@ -111,7 +111,7 @@ export default function Layout() {
     gap: 18,
     flexWrap: "wrap",
     alignItems: "center",
-    fontWeight: 900,
+    fontWeight: 400,
   };
 
   const navLink = (href: string): React.CSSProperties => ({
@@ -142,7 +142,7 @@ export default function Layout() {
   const authLink: React.CSSProperties = {
     textDecoration: "none",
     color: "#0f172a",
-    fontWeight: 900,
+    fontWeight: 600,
     border: "1px solid #cbd5e1",
     background: "white",
     padding: "8px 12px",
@@ -154,7 +154,7 @@ export default function Layout() {
     border: "1px solid #cbd5e1",
     background: "white",
     color: "#0f172a",
-    fontWeight: 900,
+    fontWeight: 600,
     padding: "8px 12px",
     borderRadius: 12,
     cursor: "pointer",
@@ -201,11 +201,11 @@ export default function Layout() {
     gap: 16,
   };
 
-  const footerTitle: React.CSSProperties = { fontWeight: 1000 };
+  const footerTitle: React.CSSProperties = { fontWeight: 700 };
   const footerLink: React.CSSProperties = {
     color: "#0f172a",
     textDecoration: "none",
-    fontWeight: 900,
+    fontWeight: 400,
   };
 
   const creditsLabel = useMemo(() => formatMoney(creditsTotal), [creditsTotal]);

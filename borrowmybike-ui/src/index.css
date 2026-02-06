@@ -21,12 +21,32 @@ body {
   font-family: var(--font-sans);
 
   /* This is the main fix: less “shouty” */
-  font-weight: 500;
-  line-height: 1.55;
+  font-weight: 400;
+  line-height: 1.6;
 
   color: var(--text-color);
   background: var(--bg-color);
 }
+
+
+/* Typography defaults: keep body copy non-bold unless explicitly styled */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+p, li {
+  font-weight: 400;
+}
+
+span {
+  font-weight: inherit;
+}
+
+strong, b {
+  font-weight: 600;
+}
+
 
 /* Minimal “utility-like” classes used in App.tsx */
 /* Layout */
@@ -111,13 +131,13 @@ thead th { position: sticky; top: 0; }
 }
 /* Calm body text helpers */
 .body-text {
-  font-weight: 500;
+  font-weight: 400;
   color: #334155;
   line-height: 1.6;
 }
 
 .muted-text {
-  font-weight: 500;
+  font-weight: 400;
   color: #475569;
   line-height: 1.6;
 }

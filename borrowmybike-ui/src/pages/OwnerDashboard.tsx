@@ -22,6 +22,7 @@ type BookingRow = {
 
   borrower_paid: boolean;
   owner_deposit_paid: boolean;
+  owner_deposit_choice?: "keep" | "refund" | null;
 
   needs_review: boolean;
   review_reason: string | null;
@@ -173,6 +174,7 @@ export default function OwnerDashboard() {
 
   // Mentor accept checklist gate
   const [gateOpen, setGateOpen] = useState(false);
+  const [gateDepositChoice, setGateDepositChoice] = useState<"keep" | "refund" | null>(null);
   const [gateBooking, setGateBooking] = useState<BookingRow | null>(null);
 
   const ownerAcceptChecklist: ChecklistItem[] = useMemo(
@@ -321,6 +323,15 @@ export default function OwnerDashboard() {
     }
   }
 
+  async function persistOwnerDepositChoice(bookingId: string, choice: "keep" | "refund") {
+    // Pre-step before deposit checkout so settle-booking can use the owner's preference.
+    const { data, error } = await sb.functions.invoke("set-owner-deposit-choice", {
+      body: { booking_id: bookingId, choice },
+    });
+    if (error) throw error;
+    return data;
+  }
+
   async function doAcceptWithDeposit(b: BookingRow) {
     setBusyId(b.id);
     setErr(null);
@@ -452,7 +463,7 @@ export default function OwnerDashboard() {
 
           void (async () => {
             // Persist preference first (so settle-booking sees it), then proceed to deposit checkout.
-            await persistOwnerDepositChoice(b.id, choice);
+            await persistOwnerDepositChoice(b.id, (choice ?? "keep"));
             await doAcceptWithDeposit(b);
           })();
         }}
@@ -719,8 +730,8 @@ export default function OwnerDashboard() {
                const scheduledMs = scheduledIso ? new Date(scheduledIso).getTime() : NaN;
                const inPast = Number.isFinite(scheduledMs) && scheduledMs < Date.now();
 
-               const hours = acceptanceHoursFor(scheduledIso || undefined);
-               const deadline = acceptanceDeadlineMs(b.created_at || null, scheduledIso || null);
+               const hours = acceptanceHoursFor({ scheduledIso: scheduledIso || undefined });
+               const deadline = acceptanceDeadlineMs({ createdAtIso: b.created_at ?? undefined, scheduledIso: scheduledIso || undefined });
 
                return (
                  <div style={{ marginTop: 8 }}>

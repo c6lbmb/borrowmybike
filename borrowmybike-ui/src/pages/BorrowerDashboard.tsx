@@ -414,8 +414,8 @@ export default function BorrowerDashboard() {
               const scheduledMs = scheduledIso ? new Date(scheduledIso).getTime() : NaN;
               const inPast = Number.isFinite(scheduledMs) && scheduledMs < Date.now();
 
-              const hours = acceptanceHoursFor(scheduledIso || undefined);
-              const deadline = acceptanceDeadlineMs(b.created_at || null, scheduledIso || null);
+              const hours = acceptanceHoursFor({ createdAtIso: b.created_at ?? null, scheduledIso });
+              const deadline = acceptanceDeadlineMs({ createdAtIso: b.created_at ?? null, scheduledIso });
 
               return (
                 <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
