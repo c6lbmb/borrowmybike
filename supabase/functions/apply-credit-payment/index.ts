@@ -109,6 +109,8 @@ serve(async (req) => {
     payment_type,
     status: "initiated", // will flip to "succeeded" after credit consumption
     amount: REQUIRED_AMOUNT,
+    method: "credit",
+    meta: { source: "apply-credit-payment", actor },
     stripe_payment_intent_id: null,
     stripe_id: null,
     borrower_id: booking.borrower_id,

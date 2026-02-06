@@ -4,7 +4,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-admin-key",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -13,6 +13,7 @@ const supabaseKey = Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const SETTLE_FN_URL = `${supabaseUrl}/functions/v1/settle-booking`;
+const SETTLE_ADMIN_KEY = Deno.env.get("SETTLE_ADMIN_KEY") ?? "";
 
 // ✅ Minimum time after scheduled start before completion can be confirmed
 const MIN_COMPLETE_MINUTES = 20;
@@ -41,7 +42,9 @@ serve(async (req) => {
   }
 
   let body: any;
-  try { body = await req.json(); } catch {
+  try {
+    body = await req.json();
+  } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -50,6 +53,7 @@ serve(async (req) => {
 
   const booking_id = body?.booking_id;
   const actor = body?.actor ?? body?.role;
+  const normalizedActor = actor === "mentor" ? "owner" : actor; // mentor alias
 
   if (!booking_id) {
     return new Response(JSON.stringify({ error: "booking_id is required" }), {
@@ -58,8 +62,8 @@ serve(async (req) => {
     });
   }
 
-  if (actor !== "borrower" && actor !== "owner") {
-    return new Response(JSON.stringify({ error: "actor must be 'borrower' or 'owner'" }), {
+  if (normalizedActor !== "borrower" && normalizedActor !== "owner") {
+    return new Response(JSON.stringify({ error: "actor must be 'borrower' or 'owner' (mentor accepted as alias)" }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -87,11 +91,14 @@ serve(async (req) => {
 
   // ✅ Must both be checked in before ANY completion confirmation
   if (!booking.borrower_checked_in || !booking.owner_checked_in) {
-    return new Response(JSON.stringify({
-      error: "Both parties must check in before confirming completion",
-      borrower_checked_in: !!booking.borrower_checked_in,
-      owner_checked_in: !!booking.owner_checked_in,
-    }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(
+      JSON.stringify({
+        error: "Both parties must check in before confirming completion",
+        borrower_checked_in: !!booking.borrower_checked_in,
+        owner_checked_in: !!booking.owner_checked_in,
+      }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   // ✅ Must be at least MIN_COMPLETE_MINUTES after scheduled start (or booking_date fallback)
@@ -106,17 +113,20 @@ serve(async (req) => {
 
   const allowedAt = startMs + MIN_COMPLETE_MINUTES * 60 * 1000;
   if (Date.now() < allowedAt) {
-    return new Response(JSON.stringify({
-      error: "Too early to confirm completion",
-      allowed_at: new Date(allowedAt).toISOString(),
-      min_complete_minutes: MIN_COMPLETE_MINUTES,
-    }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(
+      JSON.stringify({
+        error: "Too early to confirm completion",
+        allowed_at: new Date(allowedAt).toISOString(),
+        min_complete_minutes: MIN_COMPLETE_MINUTES,
+      }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   const nowIso = new Date().toISOString();
   const patch: Record<string, any> = {};
 
-  if (actor === "borrower") {
+  if (normalizedActor === "borrower") {
     if (!booking.borrower_confirmed_complete) {
       patch.borrower_confirmed_complete = true;
       patch.borrower_confirmed_complete_at = nowIso;
@@ -135,10 +145,7 @@ serve(async (req) => {
   }
 
   if (Object.keys(patch).length > 0) {
-    const { error: confirmErr } = await supabase
-      .from("bookings")
-      .update(patch)
-      .eq("id", booking_id);
+    const { error: confirmErr } = await supabase.from("bookings").update(patch).eq("id", booking_id);
 
     if (confirmErr) {
       return new Response(JSON.stringify({ error: "Failed to save completion confirmation", details: confirmErr.message }), {
@@ -196,50 +203,65 @@ serve(async (req) => {
       autoSettle = { attempted: false, reason: "already_settled" };
     } else if (b3?.completed && !b3?.settled) {
       autoSettle.attempted = true;
-      try {
-        const resp = await fetch(SETTLE_FN_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            // service role token, settle-booking doesn’t require user auth for action=settle
-            "Authorization": `Bearer ${supabaseKey}`,
-          },
-          body: JSON.stringify({ booking_id, action: "settle" }),
-        });
 
-        const text = await resp.text();
-        let js: any = null;
-        try { js = JSON.parse(text); } catch { js = { raw: text }; }
-
-        autoSettle.ok = resp.ok;
-        autoSettle.http_status = resp.status;
-        autoSettle.response = js;
-      } catch (err) {
+      if (!SETTLE_ADMIN_KEY) {
         autoSettle.ok = false;
-        autoSettle.error = String(err);
+        autoSettle.http_status = 500;
+        autoSettle.response = { error: "Server misconfigured: SETTLE_ADMIN_KEY not set" };
+      } else {
+        try {
+          const resp = await fetch(SETTLE_FN_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-admin-key": SETTLE_ADMIN_KEY,
+            },
+            body: JSON.stringify({ booking_id, action: "settle" }),
+          });
+
+          const text = await resp.text();
+          let js: any = null;
+          try {
+            js = JSON.parse(text);
+          } catch {
+            js = { raw: text };
+          }
+
+          autoSettle.ok = resp.ok;
+          autoSettle.http_status = resp.status;
+          autoSettle.response = js;
+        } catch (err) {
+          autoSettle.ok = false;
+          autoSettle.error = String(err);
+        }
       }
     }
   }
 
   const { data: final } = await supabase
     .from("bookings")
-    .select("id, borrower_confirmed_complete, owner_confirmed_complete, completed, settled, settled_at, settlement_outcome, owner_deposit_choice")
+    .select(
+      "id, borrower_confirmed_complete, owner_confirmed_complete, completed, settled, settled_at, settlement_outcome, owner_deposit_choice",
+    )
     .eq("id", booking_id)
     .single();
 
-  return new Response(JSON.stringify({
-    booking_id,
-    actor_confirmed: actor,
-    borrower_confirmed_complete: !!final?.borrower_confirmed_complete,
-    owner_confirmed_complete: !!final?.owner_confirmed_complete,
-    completed: !!final?.completed,
-    settled: !!final?.settled,
-    settled_at: final?.settled_at ?? null,
-    settlement_outcome: final?.settlement_outcome ?? null,
-    owner_deposit_choice: final?.owner_deposit_choice ?? null,
-    auto_settle: autoSettle,
-    message: bothConfirmed
-      ? "Both parties confirmed ✅ booking marked completed. Auto-settle attempted."
-      : "Confirmation saved ✅ waiting on the other party.",
-  }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  return new Response(
+    JSON.stringify({
+      booking_id,
+      actor_confirmed: normalizedActor,
+      borrower_confirmed_complete: !!final?.borrower_confirmed_complete,
+      owner_confirmed_complete: !!final?.owner_confirmed_complete,
+      completed: !!final?.completed,
+      settled: !!final?.settled,
+      settled_at: final?.settled_at ?? null,
+      settlement_outcome: final?.settlement_outcome ?? null,
+      owner_deposit_choice: final?.owner_deposit_choice ?? null,
+      auto_settle: autoSettle,
+      message: bothConfirmed
+        ? "Both parties confirmed ✅ booking marked completed. Auto-settle attempted."
+        : "Confirmation saved ✅ waiting on the other party.",
+    }),
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
 });

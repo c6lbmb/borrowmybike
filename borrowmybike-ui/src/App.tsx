@@ -45,9 +45,13 @@ export default function App() {
         {/* Dashboard */}
         <Route path="/dashboard" element={<DashboardRouter />} />
         <Route path="/dashboard/owner" element={<OwnerDashboard />} />
+        <Route path="/dashboard/mentor" element={<OwnerDashboard />} />
         <Route path="/dashboard/borrower" element={<BorrowerDashboard />} />
 
         {/* Owner flows */}
+        <Route path="/mentors/start" element={<OwnerStart />} />
+        <Route path="/mentors/new" element={<OwnerNew />} />
+
         <Route path="/owner/start" element={<OwnerStart />} />
         <Route path="/owners/start" element={<OwnerStart />} />
         <Route path="/owners/new" element={<OwnerNew />} />

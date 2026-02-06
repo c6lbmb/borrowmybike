@@ -11,76 +11,44 @@ const corsHeaders = {
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...corsHeaders },
   });
-}
-
-function toIso(d: Date) {
-  return d.toISOString();
 }
 
 function cents(amount: number) {
   return Math.round(amount * 100);
 }
 
-function statusCountsAsPaid(status: string | null | undefined) {
-  const s = String(status || "").toLowerCase();
-  return s === "paid" || s === "succeeded" || s === "captured" || s === "payout_due";
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function addDaysIso(days: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString();
+function daysBetween(aIso: string, bIso: string) {
+  const a = new Date(aIso).getTime();
+  const b = new Date(bIso).getTime();
+  return (b - a) / (1000 * 60 * 60 * 24);
 }
 
-function pickBorrowerPayment(payments: any[]) {
-  return (
-    payments.find((p) => String(p.payment_type || "").toLowerCase() === "borrower_booking") ||
-    payments.find((p) => String(p.payment_type || "").toLowerCase() === "borrower_payment") ||
-    payments.find((p) => String(p.payment_type || "").toLowerCase() === "borrower_credit") ||
-    payments.find((p) => String(p.payment_type || "").toLowerCase().includes("borrower")) ||
-    null
-  );
+function scheduledIso(booking: any) {
+  return booking?.scheduled_start_at ?? booking?.booking_date ?? null;
 }
 
-function pickOwnerDeposit(payments: any[]) {
-  return (
-    payments.find((p) => String(p.payment_type || "").toLowerCase() === "owner_deposit") ||
-    payments.find((p) => String(p.payment_type || "").toLowerCase().includes("deposit")) ||
-    null
-  );
-}
-
-async function stripeRefund(
-  paymentIntentId: string,
-  amountCents: number,
-  idempotencyKey: string,
-) {
-  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-  if (!stripeKey) throw new Error("Missing STRIPE_SECRET_KEY");
-  const stripe = new Stripe(stripeKey, { apiVersion: "2023-10-16" });
-
-  const refund = await stripe.refunds.create(
-    { payment_intent: paymentIntentId, amount: amountCents },
-    { idempotencyKey },
-  );
-
-  return refund;
-}
-
-// --- acceptance window helpers (kept) ---
+// --- acceptance window helpers (Rahim rule) ---
 function acceptanceHoursFor(scheduledIso: string | null | undefined) {
-  if (!scheduledIso) return 12;
+  // Default: 8 hours to accept
+  // If test is within 72 hours: shorter window
+  //   < 24 hours -> 2 hours
+  //   24–72 hours -> 4 hours
+  if (!scheduledIso) return 8;
   const scheduled = new Date(scheduledIso);
-  if (isNaN(scheduled.getTime())) return 12;
+  if (isNaN(scheduled.getTime())) return 8;
 
   const msUntil = scheduled.getTime() - Date.now();
-  const daysUntil = msUntil / (1000 * 60 * 60 * 24);
+  const hoursUntil = msUntil / (1000 * 60 * 60);
 
-  if (daysUntil > 14) return 24;
-  if (daysUntil >= 3) return 12;
-  return 6;
+  if (hoursUntil < 24) return 2;
+  if (hoursUntil < 72) return 4;
+  return 8;
 }
 
 function isExpiredWindow(booking: any) {
@@ -122,96 +90,93 @@ async function ensureCredit(args: {
     .eq("user_id", user_id)
     .eq("booking_id", booking_id)
     .eq("credit_type", credit_type)
+    .eq("status", "available")
     .limit(1);
 
-  if (exErr) return { ok: false as const, created: false as const, error: exErr.message };
-  if (existing && existing.length > 0) return { ok: true as const, created: false as const, error: null };
+  if (exErr) throw exErr;
+  if (existing && existing.length) return { created: false };
 
-  const { error: insErr } = await supabase
-    .from("credits")
-    .insert({
-      user_id,
-      booking_id,
-      amount,
-      currency: "CAD",
-      credit_type,
-      reason,
-      status: "available",
-      expires_at,
-    });
+  const { error: insErr } = await supabase.from("credits").insert([{
+    user_id,
+    booking_id,
+    amount,
+    currency: "CAD",
+    credit_type,
+    reason,
+    status: "available",
+    expires_at,
+    used_at: null,
+    used_on_booking_id: null,
+  }]);
 
-  if (insErr) return { ok: false as const, created: false as const, error: insErr.message };
-  return { ok: true as const, created: true as const, error: null };
+  if (insErr) throw insErr;
+  return { created: true };
 }
 
-async function restoreUsedCreditIfAny(args: {
+
+async function logBookingAudit(args: {
   supabase: any;
   booking_id: string;
-  user_id: string;
+  actor_role: string; // borrower | owner | system | admin
+  actor_user_id: string | null;
+  action: string;
+  note: string | null;
 }) {
-  const { supabase, booking_id, user_id } = args;
+  const { supabase, booking_id, actor_role, actor_user_id, action, note } = args;
+  const { error } = await supabase.from("booking_audit_log").insert([{
+    booking_id,
+    actor_role,
+    actor_user_id,
+    action,
+    note,
+  }]);
+  if (error) throw error;
+}
 
-  const { data: usedCredits, error: cuErr } = await supabase
-    .from("credits")
-    .select("*")
-    .eq("user_id", user_id)
-    .eq("status", "used")
-    .eq("used_on_booking_id", booking_id)
-    .limit(10);
-
-  if (cuErr) return { ok: false as const, restored: 0, error: cuErr.message };
-  if (!usedCredits || usedCredits.length === 0) return { ok: true as const, restored: 0, error: null };
-
-  let restored = 0;
-  for (const c of usedCredits) {
-    const { error: ruErr } = await supabase
-      .from("credits")
-      .update({
-        status: "available",
-        used_at: null,
-        used_on_booking_id: null,
-      })
-      .eq("id", c.id)
-      .eq("status", "used");
-
-    if (!ruErr) restored++;
-  }
-
-  return { ok: true as const, restored, error: null };
+async function stripeRefundPartial(
+  stripeKey: string,
+  paymentIntentId: string,
+  amountCents: number,
+  idempotencyKey: string,
+) {
+  const stripe = new Stripe(stripeKey, { apiVersion: "2023-10-16" });
+  const refund = await stripe.refunds.create(
+    { payment_intent: paymentIntentId, amount: amountCents },
+    { idempotencyKey },
+  );
+  return refund;
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return json(200, { ok: true });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
-  let payload: any = null;
+  const version = "cancel-booking/v9";
+
+  const SUPABASE_URL = Deno.env.get("MY_SUPABASE_URL");
+  const SERVICE_ROLE_KEY = Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY");
+  const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY");
+
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json(500, { error: "Missing Supabase env", version });
+
+  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2?target=deno");
+  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+  let body: any;
   try {
-    payload = await req.json();
+    body = await req.json();
   } catch {
-    return json(400, { error: "Invalid JSON body" });
+    return json(400, { error: "Invalid JSON body", version });
   }
 
-  const booking_id = payload?.booking_id;
-  const cancelled_by = payload?.cancelled_by as "borrower" | "owner" | "system_expired";
-  const refund_to_credit = Boolean(payload?.refund_to_credit); // optional UI override for Stripe payers
+  const booking_id = body?.booking_id;
+  const cancelled_by = body?.cancelled_by;
 
-  if (!booking_id) return json(400, { error: "booking_id is required" });
-  if (cancelled_by !== "borrower" && cancelled_by !== "owner" && cancelled_by !== "system_expired") {
-    return json(400, { error: "cancelled_by must be 'borrower', 'owner', or 'system_expired'" });
+  if (!booking_id) return json(400, { error: "booking_id is required", version });
+  if (!["borrower", "owner", "system_expired"].includes(cancelled_by)) {
+    return json(400, { error: "cancelled_by must be borrower | owner | system_expired", version });
   }
 
-  const version = "cancel-booking v11 (5-day rule + stripe refund default + credit fallback)";
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!supabaseUrl || !serviceKey) {
-    return json(500, { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY", version });
-  }
-
-  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.45.4");
-  const supabase = createClient(supabaseUrl, serviceKey);
-
-  // Load booking
   const { data: booking0, error: bErr } = await supabase
     .from("bookings")
     .select("*")
@@ -219,308 +184,285 @@ serve(async (req) => {
     .single();
 
   if (bErr || !booking0) return json(404, { error: "Booking not found", version });
+  if (booking0.cancelled) return json(200, { ok: true, message: "Already cancelled", version });
 
-  if (booking0.settled) return json(400, { error: "Booking already settled; cannot cancel", version });
-  if (booking0.completed) return json(400, { error: "Booking already completed; cannot cancel", version });
+  const borrower_id = booking0.borrower_id;
+  const owner_id = booking0.owner_id;
 
-  if (booking0.cancelled) {
-    return json(200, { version, booking_id, message: "Already cancelled ✅" });
-  }
-
-  // Load payments
-  const { data: payments, error: pErr } = await supabase
-    .from("payments")
-    .select("*")
-    .eq("booking_id", booking_id)
-    .order("created_at", { ascending: true });
-
-  if (pErr) return json(500, { error: "Failed to load payments", details: pErr.message, version });
-
-  const borrowerPay = pickBorrowerPayment(payments);
-  const ownerDep = pickOwnerDeposit(payments);
-
-  // SYSTEM EXPIRED branch kept (credit-only)
+  // --- system expired (owner didn't accept) ---
   if (cancelled_by === "system_expired") {
-    if (!booking0.borrower_paid) return json(400, { error: "Borrower has not paid; cannot system-expire", version });
+    if (!booking0.borrower_paid) return json(400, { error: "Borrower not paid; cannot system-expire", version });
     if (booking0.owner_deposit_paid) return json(400, { error: "Owner already accepted; cannot system-expire", version });
-    if (!isExpiredWindow(booking0)) return json(400, { error: "Booking has NOT expired yet", version });
 
-    const { data: claimed, error: claimErr } = await supabase
+    if (!isExpiredWindow(booking0)) {
+      return json(400, {
+        error: "Not expired yet",
+        acceptance_hours: acceptanceHoursFor(scheduledIso(booking0)),
+        version,
+      });
+    }
+
+    const { error: upErr } = await supabase
       .from("bookings")
       .update({
         cancelled: true,
-        cancelled_by: "system",
-        cancelled_at: toIso(new Date()),
+        cancelled_by: "system_expired",
+        cancelled_at: nowIso(),
         status: "expired_no_owner_acceptance",
-        needs_rebooking: true,
-        rebook_by: addDaysIso(21),
       })
-      .eq("id", booking_id)
-      .eq("cancelled", false)
-      .select("*")
-      .single();
+      .eq("id", booking_id);
 
-    if (claimErr || !claimed) {
-      return json(200, { version, booking_id, message: "Already cancelled ✅ (claimed by another call)" });
-    }
+    if (upErr) return json(500, { error: "Failed to update booking", details: upErr, version });
 
-    const borrower_id = String(booking0.borrower_id);
-    const rebook_by = addDaysIso(21);
-
-    const paidViaBorrowerCredit =
-      borrowerPay && String(borrowerPay.payment_type || "").toLowerCase() === "borrower_credit";
-
-    if (paidViaBorrowerCredit) {
-      const restored = await restoreUsedCreditIfAny({ supabase, booking_id, user_id: borrower_id });
-      return json(200, {
-        version,
-        booking_id,
-        scenario: "system_expired_restore_credit",
-        message: "Expired. Borrower credit restored (no refunds).",
-        restored_credits: restored.restored,
-        restore_error: restored.error,
-      });
-    }
-
-    const creditRes = await ensureCredit({
+    await ensureCredit({
       supabase,
-      booking_id,
       user_id: borrower_id,
+      booking_id,
       credit_type: "rebook_credit",
       amount: 150,
-      expires_at: rebook_by,
+      expires_at: null,
       reason: `Owner did not accept in time (booking ${booking_id}). Rebook credit issued.`,
     });
 
+    
+    await logBookingAudit({
+      supabase,
+      booking_id,
+      actor_role: "system",
+      actor_user_id: null,
+      action: "expired_no_owner_acceptance_credit_full",
+      note: `Acceptance window expired; borrower credited`,
+    });
+
+return json(200, {
+      ok: true,
+      booking_id,
+      cancelled_by,
+      acceptance_hours: acceptanceHoursFor(scheduledIso(booking0)),
+      message: "Booking expired; borrower credited ✅",
+      version,
+    });
+  }
+
+  // --- borrower/owner cancel (existing logic) ---
+  const now = nowIso();
+  const scheduled = scheduledIso(booking0);
+  const daysUntil = scheduled ? daysBetween(now, scheduled) : 0;
+
+  
+  // --- Scenario 1 / Pre-accept cancellation (only borrower paid) ---
+  // If borrower paid but owner has not accepted/paid deposit yet:
+  // - borrower cancel OR owner decline -> full borrower credit ($150), no Stripe refund.
+  if (booking0.borrower_paid && !booking0.owner_deposit_paid && ["borrower", "owner"].includes(cancelled_by)) {
+    const now = nowIso();
+
+    const isBorrowerCancel = cancelled_by === "borrower";
+    const status = isBorrowerCancel ? "cancelled_before_owner_accept" : "declined_by_owner_before_accept";
+    const cancel_scenario = isBorrowerCancel ? "borrower_cancel_pre_accept" : "owner_declined_pre_accept";
+
+    const { error: upErr } = await supabase
+      .from("bookings")
+      .update({
+        cancelled: true,
+        cancelled_by,
+        cancelled_at: now,
+        status,
+        cancel_scenario,
+        refund_status: "credit",
+        refund_amount_cents: 15000,
+        updated_at: now,
+      })
+      .eq("id", booking_id);
+
+    if (upErr) return json(500, { error: "Failed to update booking", details: upErr, version });
+
+    await ensureCredit({
+      supabase,
+      user_id: borrower_id,
+      booking_id,
+      credit_type: "rebook_credit",
+      amount: 150,
+      expires_at: null,
+      reason: isBorrowerCancel
+        ? `Borrower cancelled before owner accepted (booking ${booking_id}). Full credit issued.`
+        : `Owner declined before accepting (booking ${booking_id}). Borrower full credit issued.`,
+    });
+
+    await logBookingAudit({
+      supabase,
+      booking_id,
+      actor_role: isBorrowerCancel ? "borrower" : "owner",
+      actor_user_id: isBorrowerCancel ? borrower_id : owner_id,
+      action: "cancel_pre_accept_credit_full",
+      note: cancel_scenario,
+    });
+
     return json(200, {
-      version,
+      ok: true,
       booking_id,
-      scenario: "system_expired_issue_credit",
-      message: "Expired. Borrower issued $150 platform credit to rebook (no refunds).",
-      credit_created: creditRes.created,
-      credit_error: creditRes.error,
-      expires_at: rebook_by,
+      cancelled_by,
+      message: "Pre-accept cancellation handled; borrower credited ✅",
+      version,
     });
   }
 
-  // From here on: borrower/owner cancellations
-  const borrowerPaidByPayments = borrowerPay ? statusCountsAsPaid(borrowerPay.status) : false;
-  const ownerPaidByPayments = ownerDep ? statusCountsAsPaid(ownerDep.status) : false;
-
-  const bothPaid = borrowerPaidByPayments && ownerPaidByPayments && booking0.borrower_paid && booking0.owner_deposit_paid;
-  if (!bothPaid) {
+// Require both paid for borrower/owner cancel logic
+  if (!booking0.borrower_paid || !booking0.owner_deposit_paid) {
     return json(400, {
+      error: "Cannot cancel this way unless both borrower and owner have paid",
+      borrower_paid: booking0.borrower_paid,
+      owner_deposit_paid: booking0.owner_deposit_paid,
       version,
-      booking_id,
-      error: "Cancel rules require both parties paid (confirmed).",
-      debug: {
-        borrowerPaidByPayments,
-        ownerPaidByPayments,
-        borrower_paid_flag: booking0.borrower_paid,
-        owner_deposit_paid_flag: booking0.owner_deposit_paid,
-        payment_types_found: payments.map((p: any) => p.payment_type),
-      },
     });
   }
 
-  // Time rule: >5 days vs <=5 days
-  const dUntil = daysUntilTest(booking0);
-  const isMoreThan5Days = dUntil > 5;
+  const canceller = cancelled_by; // 'borrower' or 'owner'
+  const otherParty = canceller === "borrower" ? "owner" : "borrower";
 
-  // Amounts
-  const adminFee = isMoreThan5Days ? 37.5 : 150;
-  const cancellerReturn = isMoreThan5Days ? 112.5 : 0;
+  const canceller_user_id = canceller === "borrower" ? borrower_id : owner_id;
+  const other_user_id = otherParty === "borrower" ? borrower_id : owner_id;
 
-  const cancellerUserId = cancelled_by === "borrower" ? String(booking0.borrower_id) : String(booking0.owner_id);
-  const otherPartyUserId = cancelled_by === "borrower" ? String(booking0.owner_id) : String(booking0.borrower_id);
+  // Fee rules:
+  // > 5 days: 25% platform fee ($37.50) and $112.50 back to canceller
+  // <= 5 days: canceller forfeits full $150
+  const early = daysUntil > 5;
 
-  const cancellerPayment = cancelled_by === "borrower" ? borrowerPay : ownerDep;
-  const otherPartyPayment = cancelled_by === "borrower" ? ownerDep : borrowerPay;
+  const cancellerRefund = early ? 112.5 : 0;
+  const platformIncome = early ? 37.5 : 150;
 
-  // ATOMIC CLAIM: set cancelled
-  const { data: claimed, error: claimErr } = await supabase
+  // Find payment intents for potential Stripe refunds
+  const { data: pBorrower, error: pBErr } = await supabase
+    .from("payments")
+    .select("*")
+    .eq("booking_id", booking_id)
+    .eq("payment_type", "borrower_booking")
+    .maybeSingle();
+
+  if (pBErr) return json(500, { error: "Failed to load borrower payment row", details: pBErr, version });
+
+  const { data: pOwner, error: pOErr } = await supabase
+    .from("payments")
+    .select("*")
+    .eq("booking_id", booking_id)
+    .eq("payment_type", "owner_deposit")
+    .maybeSingle();
+
+  if (pOErr) return json(500, { error: "Failed to load owner payment row", details: pOErr, version });
+
+  const borrowerPI = (pBorrower as any)?.stripe_payment_intent_id ?? null;
+  const ownerPI = (pOwner as any)?.stripe_payment_intent_id ?? null;
+
+  // 1) mark booking cancelled
+  const { error: bUpErr } = await supabase
     .from("bookings")
     .update({
       cancelled: true,
-      cancelled_by,
-      cancelled_at: toIso(new Date()),
-      status: "cancelled",
-      needs_rebooking: true,
-      rebook_by: addDaysIso(21),
+      cancelled_by: canceller,
+      cancelled_at: now,
+      status: early ? "cancelled_early" : "cancelled_late",
     })
-    .eq("id", booking_id)
-    .eq("cancelled", false)
-    .select("*")
-    .single();
+    .eq("id", booking_id);
 
-  if (claimErr || !claimed) {
-    return json(200, { version, booking_id, message: "Already cancelled ✅ (claimed by another call)" });
-  }
+  if (bUpErr) return json(500, { error: "Failed to update booking", details: bUpErr, version });
 
-  // Record platform income (idempotent guard: only insert if not already present)
-  let platformIncomeInsertError: string | null = null;
-  {
-    const { data: existingPI } = await supabase
-      .from("payments")
-      .select("id")
-      .eq("booking_id", booking_id)
-      .eq("payment_type", "platform_income_cancel_fee")
-      .limit(1);
+  // 2) rebook credit for the non-cancelling party (always full 150)
+  await ensureCredit({
+    supabase,
+    user_id: other_user_id,
+    booking_id,
+    credit_type: "rebook_credit",
+    amount: 150,
+    expires_at: null,
+    reason: `Other party cancelled (${canceller}). Rebook credit issued.`,
+  });
 
-    if (!existingPI || existingPI.length === 0) {
-      const { error: piErr } = await supabase.from("payments").insert({
-        booking_id,
-        payment_type: "platform_income_cancel_fee",
-        status: "succeeded",
-        amount: adminFee,
-        currency: "CAD",
-        borrower_id: booking0.borrower_id,
-        owner_id: booking0.owner_id,
-      });
-      if (piErr) platformIncomeInsertError = piErr.message;
-    }
-  }
+  // 3) handle canceller refund:
+  // - if early, refund $112.50 back to canceller (prefer Stripe refund if PI exists)
+  // - else late, no refund
+  const refundResult: any = { performed: false, via: null, stripe_refund_id: null };
 
-  // 1) Non-cancelling party ALWAYS gets 150 back as platform credit to rebook.
-  // If they paid with credit originally, restore it (best). Otherwise issue rebook_credit.
-  const rebook_by = addDaysIso(21);
-  const otherPaidViaCredit =
-    otherPartyPayment && String(otherPartyPayment.payment_type || "").toLowerCase().includes("credit");
+  if (early && cancellerRefund > 0) {
+    const piToRefund = canceller === "borrower" ? borrowerPI : ownerPI;
 
-  let otherPartyCreditResult: any = null;
-  if (otherPaidViaCredit) {
-    const restored = await restoreUsedCreditIfAny({
-      supabase,
-      booking_id,
-      user_id: otherPartyUserId,
-    });
-    if (restored.restored > 0) {
-      otherPartyCreditResult = { mode: "restored_used_credit", restored: restored.restored, error: restored.error };
-    } else {
-      const cred = await ensureCredit({
-        supabase,
-        booking_id,
-        user_id: otherPartyUserId,
-        credit_type: "rebook_credit",
-        amount: 150,
-        expires_at: rebook_by,
-        reason:
-          cancelled_by === "borrower"
-            ? `Borrower cancelled. Owner credited $150 to rebook (booking ${booking_id}).`
-            : `Owner cancelled. Borrower credited $150 to rebook (booking ${booking_id}).`,
-      });
-      otherPartyCreditResult = { mode: "issued_rebook_credit", created: cred.created, error: cred.error };
-    }
-  } else {
-    const cred = await ensureCredit({
-      supabase,
-      booking_id,
-      user_id: otherPartyUserId,
-      credit_type: "rebook_credit",
-      amount: 150,
-      expires_at: rebook_by,
-      reason:
-        cancelled_by === "borrower"
-          ? `Borrower cancelled. Owner credited $150 to rebook (booking ${booking_id}).`
-          : `Owner cancelled. Borrower credited $150 to rebook (booking ${booking_id}).`,
-    });
-    otherPartyCreditResult = { mode: "issued_rebook_credit", created: cred.created, error: cred.error };
-  }
+    if (piToRefund && STRIPE_SECRET_KEY) {
+      try {
+        const refund = await stripeRefundPartial(
+          STRIPE_SECRET_KEY,
+          piToRefund,
+          cents(cancellerRefund),
+          `cancel_${booking_id}_${canceller}_${now}`,
+        );
 
-  // 2) Canceller gets 112.50 back ONLY if >5 days. (<=5 days => forfeiture)
-  let cancellerReturnResult: any = { mode: "forfeiture", returned: 0 };
+        refundResult.performed = true;
+        refundResult.via = "stripe";
+        refundResult.stripe_refund_id = refund.id;
+      } catch (e: any) {
+        // fallback to credit if Stripe refund fails
+        await ensureCredit({
+          supabase,
+          user_id: canceller_user_id,
+          booking_id,
+          credit_type: "rebook_credit",
+          amount: cancellerRefund,
+          expires_at: null,
+          reason: `Cancellation refund (Stripe refund failed). Credit issued.`,
+        });
 
-  if (isMoreThan5Days && cancellerReturn > 0) {
-    const cancellerPaidViaCredit =
-      cancellerPayment && String(cancellerPayment.payment_type || "").toLowerCase().includes("credit");
-
-    const pi = cancellerPayment
-      ? (cancellerPayment.stripe_payment_intent_id || cancellerPayment.stripe_id || null)
-      : null;
-
-    // If Stripe payment exists and UI didn't request credit, do Stripe refund
-    const shouldStripeRefund = Boolean(pi) && !refund_to_credit;
-
-    if (shouldStripeRefund) {
-      // idempotency: if refund already recorded, don’t refund again
-      if (cancellerPayment.refund_id || String(cancellerPayment.refund_status || "").toLowerCase() === "succeeded") {
-        cancellerReturnResult = {
-          mode: "stripe_refund_already_done",
-          returned: cancellerReturn,
-          refund_id: cancellerPayment.refund_id ?? null,
-          refund_status: cancellerPayment.refund_status ?? null,
-        };
-      } else {
-        try {
-          const amountCents = cents(cancellerReturn);
-          const idemKey = `cancel-refund:${booking_id}:${cancellerPayment.id}:${amountCents}`;
-          const refund = await stripeRefund(String(pi), amountCents, idemKey);
-
-          const { error: updErr } = await supabase
-            .from("payments")
-            .update({
-              refund_id: refund?.id ?? null,
-              refunded_amount_cents: refund?.amount ?? null,
-              refund_status: refund?.status ?? null,
-            })
-            .eq("id", cancellerPayment.id);
-
-          cancellerReturnResult = {
-            mode: "stripe_refund",
-            returned: cancellerReturn,
-            refund_id: refund?.id ?? null,
-            refund_status: refund?.status ?? null,
-            payment_update_error: updErr ? updErr.message : null,
-          };
-        } catch (e: any) {
-          // IMPORTANT: booking is already cancelled — surface error clearly for manual action.
-          return json(500, {
-            version,
-            booking_id,
-            error: "Stripe refund failed (booking already cancelled).",
-            message: e?.message || String(e),
-            debug: { adminFee, cancellerReturn, cancelled_by },
-          });
-        }
+        refundResult.performed = true;
+        refundResult.via = "credit_fallback";
+        refundResult.error = e?.message ?? String(e);
       }
     } else {
-      // Credit fallback (covers paid-via-credit, missing PI, or user chose credit instead of Stripe refund)
-      const creditType = "cancel_refund_credit";
-      const reason =
-        `Refund for canceller (${cancelled_by}) on booking ${booking_id} (>5 days). ` +
-        `Returned ${cancellerReturn.toFixed(2)} (admin fee ${adminFee.toFixed(2)}).`;
-
-      const cred = await ensureCredit({
+      // no PI -> credit fallback
+      await ensureCredit({
         supabase,
+        user_id: canceller_user_id,
         booking_id,
-        user_id: cancellerUserId,
-        credit_type: creditType,
-        amount: cancellerReturn,
-        expires_at: rebook_by,
-        reason,
+        credit_type: "rebook_credit",
+        amount: cancellerRefund,
+        expires_at: null,
+        reason: `Cancellation refund (no Stripe PI). Credit issued.`,
       });
 
-      cancellerReturnResult = {
-        mode: refund_to_credit ? "credit_refund_user_chose" : (cancellerPaidViaCredit ? "credit_refund_paid_via_credit" : "credit_refund_no_pi"),
-        returned: cancellerReturn,
-        credit_created: cred.created,
-        credit_error: cred.error,
-      };
+      refundResult.performed = true;
+      refundResult.via = "credit";
     }
   }
 
-  return json(200, {
-    version,
+  // 4) record platform income payment row
+  const { error: platErr } = await supabase.from("payments").insert([{
+    booking_id,
+    payment_type: "platform_income_cancel_fee",
+    status: "paid",
+    amount: platformIncome,
+    currency: "CAD",
+    borrower_id,
+    owner_id,
+  }]);
+
+  if (platErr) return json(500, { error: "Failed to insert platform income row", details: platErr, version });
+
+  
+  await logBookingAudit({
+    supabase,
+    booking_id,
+    actor_role: canceller,
+    actor_user_id: canceller_user_id,
+    action: early ? "cancel_gt_5_days" : "cancel_lte_5_days",
+    note: `cancellerRefund=${cancellerRefund}; platformIncome=${platformIncome}; refundResult=${refundResult ? "stripe_refund" : "credit_or_none"}`,
+  });
+
+return json(200, {
+    ok: true,
     booking_id,
     cancelled_by,
-    rule: isMoreThan5Days ? ">5_days" : "<=5_days_forfeit",
-    admin_fee_platform_income: adminFee,
-    canceller_return: cancellerReturn,
-    other_party_rebook_credit: 150,
-    results: {
-      otherParty: otherPartyCreditResult,
-      canceller: cancellerReturnResult,
-      platformIncomeInsertError,
-    },
+    early,
+    daysUntil,
+    cancellerRefund,
+    platformIncome,
+    borrowerPI_present: !!borrowerPI,
+    ownerPI_present: !!ownerPI,
+    refundResult,
+    version,
   });
 });

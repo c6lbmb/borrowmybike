@@ -1,5 +1,6 @@
 // src/components/Layout.tsx
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import ScrollToTop from "./ScrollToTop";
 import { useAuth } from "../auth/useAuth";
 import { sb } from "../lib/supabase";
@@ -7,6 +8,14 @@ import { sb } from "../lib/supabase";
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   return pathname.startsWith(href);
+}
+
+function formatMoney(amount: number | null) {
+  if (amount == null) return "—";
+  // credits are stored as numeric; keep simple display
+  const rounded = Math.round(amount * 100) / 100;
+  // show no decimals when clean integer
+  return Number.isInteger(rounded) ? `$${rounded}` : `$${rounded.toFixed(2)}`;
 }
 
 export default function Layout() {
@@ -20,6 +29,46 @@ export default function Layout() {
     (user as any)?.user_metadata?.email ||
     (user as any)?.identities?.[0]?.identity_data?.email ||
     null;
+
+  const me = (user as any)?.id ?? null;
+
+  // Credits (global display)
+  const [creditsTotal, setCreditsTotal] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCredits() {
+      if (!me) {
+        setCreditsTotal(null);
+        return;
+      }
+
+      // If RLS blocks this, we fail silently and show "—"
+      try {
+        const res = await sb
+          .from("credits")
+          .select("amount")
+          .eq("user_id", me)
+          .eq("status", "available");
+
+        if (res.error) throw res.error;
+
+        const rows = (res.data as any[]) || [];
+        const sum = rows.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+
+        if (!cancelled) setCreditsTotal(sum);
+      } catch {
+        if (!cancelled) setCreditsTotal(null);
+      }
+    }
+
+    loadCredits();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [me]);
 
   const shell: React.CSSProperties = {
     minHeight: "100vh",
@@ -76,7 +125,7 @@ export default function Layout() {
   /* RIGHT AUTH AREA */
   const rightArea: React.CSSProperties = {
     display: "flex",
-    flexDirection: "column", // <-- stack buttons + email
+    flexDirection: "column", // stack buttons + meta lines
     alignItems: "flex-end",
     gap: 6,
     minWidth: 190,
@@ -112,7 +161,8 @@ export default function Layout() {
     whiteSpace: "nowrap",
   };
 
-  const signedInAs: React.CSSProperties = {
+  // Same subtle style as Signed-in email line (as you requested)
+  const metaLine: React.CSSProperties = {
     fontSize: 12,
     color: "#64748b",
     fontWeight: 450,
@@ -158,6 +208,8 @@ export default function Layout() {
     fontWeight: 900,
   };
 
+  const creditsLabel = useMemo(() => formatMoney(creditsTotal), [creditsTotal]);
+
   return (
     <div style={shell}>
       <ScrollToTop />
@@ -174,7 +226,8 @@ export default function Layout() {
             <Link to="/" style={navLink("/")}>Home</Link>
             <Link to="/browse" style={navLink("/browse")}>Browse</Link>
             <Link to="/test-takers" style={navLink("/test-takers")}>Taking a road test?</Link>
-            <Link to="/owners/start" style={navLink("/owners")}>Earn $100</Link>
+            <Link to="/mentors/start" style={navLink("/mentors")}>List your bike • Earn $100</Link>
+
             <Link to="/dashboard" style={navLink("/dashboard")}>Dashboard</Link>
             <Link to="/rules" style={navLink("/rules")}>Rules</Link>
             <Link to="/legal" style={navLink("/legal")}>Legal</Link>
@@ -189,8 +242,13 @@ export default function Layout() {
                   <button onClick={signOut} style={signOutBtn}>Sign out</button>
                 </div>
 
-                {/* Subtle email, not bold, under buttons */}
-                <div style={signedInAs} title={email ?? ""}>
+                {/* Subtle credits line (global) */}
+                <div style={metaLine} title="Available credits on your account">
+                  Credits: {creditsLabel}
+                </div>
+
+                {/* Subtle email line */}
+                <div style={metaLine} title={email ?? ""}>
                   {email ? `Signed in as ${email}` : "Signed in"}
                 </div>
               </>
@@ -216,11 +274,11 @@ export default function Layout() {
             <div style={{ marginTop: 8, color: "#475569", fontWeight: 800 }}>
               Road tests only. Not a rental company.
               <br />
-              Launching province-by-province — owners can list Canada-wide.
+              Launching province-by-province — mentors can list Canada-wide.
             </div>
             <div style={{ marginTop: 10, color: "#475569", fontWeight: 800 }}>
               Questions? Email{" "}
-              <span style={{ fontWeight: 1000, color: "#0f172a" }}>support@class6loaner.com</span>
+              <span style={{ fontWeight: 1000, color: "#0f172a" }}>support@borrowmybike.ca</span>
             </div>
             <div style={{ marginTop: 10, color: "#94a3b8", fontWeight: 800, fontSize: 12 }}>
               © {new Date().getFullYear()} BorrowMyBike. All rights reserved.
@@ -231,7 +289,7 @@ export default function Layout() {
             <div style={footerTitle}>Explore</div>
             <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
               <Link to="/browse" style={footerLink}>Browse bikes</Link>
-              <Link to="/owners/start" style={footerLink}>List your bike</Link>
+              <Link to="/mentors/start" style={footerLink}>List your bike</Link>
               <Link to="/dashboard" style={footerLink}>Dashboard</Link>
             </div>
           </div>

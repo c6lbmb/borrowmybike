@@ -10,6 +10,9 @@ const corsHeaders = {
 
 const supabaseUrl = Deno.env.get("MY_SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY")!;
+if (!supabaseUrl) throw new Error("Missing MY_SUPABASE_URL secret");
+if (!serviceRoleKey) throw new Error("Missing MY_SUPABASE_SERVICE_ROLE_KEY secret");
+
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 function toMs(iso: string | null): number {
@@ -19,63 +22,56 @@ function toMs(iso: string | null): number {
 }
 
 /**
- * Check-in window rules (as requested):
+ * Check-in window rules:
  * - Opens 15 minutes before scheduled start
  * - Closes 60 minutes after scheduled start
- *
- * NOTE: We still compute `end` for reference/debug output, but `close`
- * is based on start time (not end time) by design.
  */
 function checkInWindow(startIso: string, durationMinutes: number) {
   const start = toMs(startIso);
   const durMs = (Number(durationMinutes || 30) * 60 * 1000);
   const end = start + durMs;
 
-  // ✅ New guardrails
-  const open = start - (15 * 60 * 1000);        // 15 minutes before start
-  const close = start + (60 * 60 * 1000);       // 60 minutes after start
+  const open = start - (15 * 60 * 1000);
+  const close = start + (60 * 60 * 1000);
 
   return { start, end, open, close };
 }
 
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function normalizeActor(raw: unknown): "borrower" | "owner" | null {
+  const a = String(raw ?? "").toLowerCase().trim();
+  if (a === "borrower") return "borrower";
+  if (a === "owner") return "owner";
+  if (a === "mentor") return "owner"; // ✅ mentor is alias for owner
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Only POST is allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  if (req.method !== "POST") return json(405, { error: "Only POST is allowed" });
 
   let body: any;
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json(400, { error: "Invalid JSON body" });
   }
 
   const booking_id = body?.booking_id;
-  const actor = body?.actor ?? body?.role; // ✅ alias
+  if (!booking_id) return json(400, { error: "booking_id is required" });
 
-  if (!booking_id) {
-    return new Response(JSON.stringify({ error: "booking_id is required" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+  const normalizedActor = normalizeActor(body?.actor ?? body?.role);
+  if (!normalizedActor) {
+    return json(400, {
+      error: "actor must be 'borrower' or 'owner' (mentor accepted as alias)",
+      received: body?.actor ?? body?.role ?? null,
     });
-  }
-
-  if (actor !== "borrower" && actor !== "owner") {
-    return new Response(
-      JSON.stringify({ error: "actor must be 'borrower' or 'owner'" }),
-      {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
   }
 
   const { data: booking, error: bookingErr } = await supabase
@@ -87,8 +83,6 @@ serve(async (req) => {
       "duration_minutes",
       "cancelled",
       "completed",
-      "borrower_id",
-      "owner_id",
       "borrower_paid",
       "owner_deposit_paid",
       "borrower_checked_in",
@@ -99,103 +93,62 @@ serve(async (req) => {
     .eq("id", booking_id)
     .single();
 
-  if (bookingErr) {
-    return new Response(
-      JSON.stringify({ error: "Booking lookup failed", details: bookingErr.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
+  if (bookingErr) return json(500, { error: "Booking lookup failed", details: bookingErr.message });
+  if (!booking) return json(404, { error: "Booking not found" });
 
-  if (!booking) {
-    return new Response(JSON.stringify({ error: "Booking not found" }), {
-      status: 404,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  if (booking.cancelled) return json(400, { error: "Booking is cancelled" });
+  if (booking.completed) return json(400, { error: "Booking is already completed" });
 
-  // Role authorization (must be borrower or owner on this booking)
-  const isBorrower = booking.borrower_id === body?.user_id || booking.borrower_id === body?.uid || booking.borrower_id; // keep existing behavior light
-  const isOwner = booking.owner_id === body?.user_id || booking.owner_id === body?.uid || booking.owner_id;
-
-  // We actually enforce by comparing to booking row IDs, not caller IDs here,
-  // because we use service role. The function relies on "actor" + booking state.
-  // (Your other functions enforce auth more strictly.)
-  // If you want hard auth enforcement here later, we can add JWT verification.
-
-  if (booking.cancelled) {
-    return new Response(JSON.stringify({ error: "Booking is cancelled" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  if (booking.completed) {
-    return new Response(JSON.stringify({ error: "Booking is already completed" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  if (!booking.borrower_paid) {
-    return new Response(JSON.stringify({ error: "Borrower has not paid yet" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  if (!booking.owner_deposit_paid) {
-    return new Response(JSON.stringify({ error: "Owner deposit has not been paid yet" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  if (!booking.borrower_paid) return json(400, { error: "Borrower has not paid yet" });
+  if (!booking.owner_deposit_paid) return json(400, { error: "Owner deposit has not been paid yet" });
 
   // ✅ Use scheduled_start_at if present, else booking_date
   const effectiveStart = booking.scheduled_start_at ?? booking.booking_date;
-  if (!effectiveStart) {
-    return new Response(JSON.stringify({ error: "Booking start time missing" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  if (!effectiveStart) return json(400, { error: "Booking start time missing" });
 
   const { open, close, start, end } = checkInWindow(effectiveStart, booking.duration_minutes ?? 30);
   const now = Date.now();
 
   if (!Number.isFinite(open) || !Number.isFinite(close) || !Number.isFinite(start)) {
-    return new Response(JSON.stringify({ error: "Invalid start time format" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json(400, { error: "Invalid start time format", effectiveStart });
   }
 
+  // Helpful debug
+  console.log("check-in timing", {
+    booking_id,
+    actor: normalizedActor,
+    now: new Date(now).toISOString(),
+    booking_start: new Date(start).toISOString(),
+    opens_at: new Date(open).toISOString(),
+    closes_at: new Date(close).toISOString(),
+    booking_end: Number.isFinite(end) ? new Date(end).toISOString() : null,
+  });
+
   if (now < open) {
-    return new Response(JSON.stringify({
+    return json(400, {
       error: "Check-in not open yet",
       opens_at: new Date(open).toISOString(),
       booking_start: new Date(start).toISOString(),
-    }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    });
   }
 
   if (now > close) {
-    return new Response(JSON.stringify({
+    return json(400, {
       error: "Check-in window closed",
       closes_at: new Date(close).toISOString(),
       booking_start: new Date(start).toISOString(),
       booking_end: Number.isFinite(end) ? new Date(end).toISOString() : null,
-    }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  const already = actor === "borrower" ? !!booking.borrower_checked_in : !!booking.owner_checked_in;
-  if (already) {
-    return new Response(JSON.stringify({ error: "Already checked in" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
+  const already = normalizedActor === "borrower"
+    ? !!booking.borrower_checked_in
+    : !!booking.owner_checked_in;
+
+  if (already) return json(400, { error: "Already checked in" });
+
   const patch: Record<string, any> = {};
-  if (actor === "borrower") {
+  if (normalizedActor === "borrower") {
     patch.borrower_checked_in = true;
     patch.borrower_checked_in_at = new Date().toISOString();
   } else {
@@ -208,23 +161,20 @@ serve(async (req) => {
     .update(patch)
     .eq("id", booking_id);
 
-  if (updErr) {
-    return new Response(JSON.stringify({ error: "Failed to update check-in", details: updErr.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  if (updErr) return json(500, { error: "Failed to update check-in", details: updErr.message });
 
-  const { data: updated } = await supabase
+  const { data: updated, error: readErr } = await supabase
     .from("bookings")
     .select("id, borrower_checked_in, borrower_checked_in_at, owner_checked_in, owner_checked_in_at")
     .eq("id", booking_id)
     .single();
 
-  return new Response(JSON.stringify({
+  if (readErr) return json(500, { error: "Check-in updated but readback failed", details: readErr.message });
+
+  return json(200, {
     booking_id,
-    actor,
+    actor: normalizedActor,
     message: "Checked in ✅",
     ...updated,
-  }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  });
 });

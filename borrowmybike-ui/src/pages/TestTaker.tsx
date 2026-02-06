@@ -201,7 +201,7 @@ export default function TestTaker() {
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link to="/browse" style={styles.btnGhost}>Browse bikes →</Link>
-          <Link to="/owners/start" style={styles.btnGhost}>Earn $100 (owners) →</Link>
+          <Link to="/mentors/start" style={styles.btnGhost}>Earn $100 (mentors) →</Link>
         </div>
       </div>
 
@@ -247,7 +247,7 @@ export default function TestTaker() {
           <label style={styles.label}>
             <div style={styles.labelText}>Name</div>
             <input value={name} onChange={(e) => setName(e.target.value)} style={styles.input} placeholder="Your name" />
-            <div style={styles.helper}>Optional — helps owners feel more comfortable accepting.</div>
+            <div style={styles.helper}>Optional — helps mentors feel more comfortable accepting.</div>
           </label>
 
           <label style={styles.label}>

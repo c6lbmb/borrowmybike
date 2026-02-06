@@ -241,14 +241,14 @@ export default function Home() {
     <div style={page}>
       {/* Top “deployed-style” info strip */}
       <div style={topCard}>
-        <div style={topTitle}>Owners earn $100 for helping with a registry road test.</div>
+        <div style={topTitle}>Mentors earn $100 for helping with a registry road test.</div>
         <div style={topSub}>
           Meet at the registry → wait nearby → confirm you have your bike back. Fees are compensation — not a rental.
         </div>
         <div style={chipRow}>
-          <span style={chip}>Owner-controlled acceptance</span>
+          <span style={chip}>Mentor-controlled acceptance</span>
           <span style={chip}>Deposits for accountability</span>
-          <span style={chip}>Canada-wide owner onboarding</span>
+          <span style={chip}>Canada-wide mentor onboarding</span>
         </div>
       </div>
 
@@ -258,12 +258,12 @@ export default function Home() {
           <h1 style={h1}>Road-test matching — calm, structured, and built for accountability.</h1>
 
           <div style={lead}>
-            We connect Test-Takers with independent Owners who are willing to meet at a registry for a scheduled road test.
-            Fees are compensation for the owner’s time, fuel, and admin — not a recreational rental.
+            We connect Test-Takers with independent Mentors who are willing to meet at a registry for a scheduled road test.
+            Fees are compensation for the mentor’s time, fuel, and admin — not a recreational rental.
           </div>
 
           <div style={btnRow}>
-            <Link to="/owners/start" style={primaryBtn}>Earn $100 (List your bike) →</Link>
+            <Link to="/mentors/start" style={primaryBtn}>Earn $100 (List your bike) →</Link>
             <Link to="/test-takers" style={secondaryBtn}>I’m taking my road test →</Link>
             <Link to="/browse" style={secondaryBtn}>Browse bikes →</Link>
           </div>
@@ -272,7 +272,7 @@ export default function Home() {
         <img src={HERO_SRC} alt="Motorcycle on the road" style={heroImg} />
 
         <div style={ownerFlow}>
-          <span style={ownerFlowStrong}>Owner flow:</span>{" "}
+          <span style={ownerFlowStrong}>Mentor flow:</span>{" "}
           meet at the registry → grab a coffee or run errands → after the test, confirm you have your bike back — and you’ve earned $100.
         </div>
       </div>
@@ -292,7 +292,7 @@ export default function Home() {
         <div style={card}>
           <div style={cardTitle}>Insurance awareness</div>
           <div style={cardText}>
-            Owners provide bikes under permissive use (not renting). See{" "}
+            Mentors provide bikes under permissive use (not renting). See{" "}
             <Link to="/legal" style={smallLink}>Legal &amp; Policies</Link>.
           </div>
         </div>
@@ -301,7 +301,7 @@ export default function Home() {
       {/* 2 big cards */}
       <div className="__grid2" style={grid2}>
         <div style={card}>
-          <div style={bigCardTitle}>For owners</div>
+          <div style={bigCardTitle}>For mentors</div>
           <ul style={bullets}>
             <li>Meet at the pre-arranged registry.</li>
             <li>Wait nearby (coffee, shopping, errands).</li>
@@ -312,7 +312,7 @@ export default function Home() {
           </ul>
 
           <div style={actionBtnRow}>
-            <Link to="/owners/start" style={primaryBtn}>List your bike →</Link>
+            <Link to="/mentors/start" style={primaryBtn}>List your bike →</Link>
           </div>
         </div>
 
@@ -336,25 +336,25 @@ export default function Home() {
 
         <div style={q}>Are you a rental company?</div>
         <div style={a}>
-          No. BorrowMyBike is a matching platform for registry road tests only. Fees compensate the owner for time, fuel, and admin —
+          No. BorrowMyBike is a matching platform for registry road tests only. Fees compensate the mentor for time, fuel, and admin —
           it’s not a recreational rental.
         </div>
 
-        <div style={q}>How does the Owner earn $100?</div>
+        <div style={q}>How does the Mentor earn $100?</div>
         <div style={a}>
-          Owners meet at the registry, wait nearby, and after the test they confirm they have their bike back. Once possession is confirmed,
+          Mentors meet at the registry, wait nearby, and after the test they confirm they have their bike back. Once possession is confirmed,
           payout is released.
         </div>
 
-        <div style={q}>Why does the Owner put up a $150 deposit?</div>
+        <div style={q}>Why does the Mentor put up a $150 deposit?</div>
         <div style={a}>
-          To keep the owner accountable. If the owner doesn’t show or the bike isn’t road-worthy at the registry appointment, the deposit can
+          To keep the mentor accountable. If the mentor doesn’t show or the bike isn’t road-worthy at the registry appointment, the deposit can
           be used to compensate the test-taker to reduce rebooking risk.
         </div>
 
         <div style={q}>What about insurance?</div>
         <div style={a}>
-          Bikes are provided under permissive use (not renting). Owners should confirm coverage with their insurer and ensure valid registration
+          Bikes are provided under permissive use (not renting). Mentors should confirm coverage with their insurer and ensure valid registration
           and insurance. Test-takers may be responsible for loss or damage during the test.
         </div>
 

@@ -127,7 +127,7 @@ export default function Legal() {
           <Link to="/test-takers" style={quickLink}>
             Taking a road test? →
           </Link>
-          <Link to="/owners/start" style={quickLink}>
+          <Link to="/mentors/start" style={quickLink}>
             List your bike →
           </Link>
         </div>
@@ -142,14 +142,14 @@ export default function Legal() {
           stable.
         </div>
 
-        <div style={qaQ}>Before the owner accepts (before owner deposit is paid)</div>
+        <div style={qaQ}>Before the mentor accepts (before mentor deposit is paid)</div>
         <div style={qaA}>
-          If the owner hasn’t accepted yet, the request can be cancelled and the test-taker receives their funds back (the
+          If the mentor hasn’t accepted yet, the request can be cancelled and the test-taker receives their funds back (the
           registry appointment isn’t “blocked” yet). If a platform admin fee applies in your configuration, it will be
           shown during checkout.
         </div>
 
-        <div style={qaQ}>After the owner accepts (booking confirmed)</div>
+        <div style={qaQ}>After the mentor accepts (booking confirmed)</div>
         <ul style={ul}>
           <li>
             <b>Early cancel</b> (more than 5 days before the test): cancelling party receives a refund minus{" "}
@@ -178,16 +178,16 @@ export default function Legal() {
           Deposits reduce no-shows and protect both sides when a registry booking would otherwise be lost.
         </div>
 
-        <div style={qaQ}>Why does the owner put up a $150 deposit?</div>
+        <div style={qaQ}>Why does the mentor put up a $150 deposit?</div>
         <div style={qaA}>
-          To keep the owner accountable. If the owner no-shows or the bike isn’t road-worthy at the appointment (invalid
-          insurance/registration, unsafe condition, required lights not working, etc.), the owner’s deposit can be used to
+          To keep the mentor accountable. If the mentor no-shows or the bike isn’t road-worthy at the appointment (invalid
+          insurance/registration, unsafe condition, required lights not working, etc.), the mentor’s deposit can be used to
           compensate the test-taker so they can rebook.
         </div>
 
         <div style={qaQ}>Why does the test-taker pay $150?</div>
         <div style={qaA}>
-          The test-taker fee compensates the owner for time, fuel, and admin. This is not a recreational rental — it’s
+          The test-taker fee compensates the mentor for time, fuel, and admin. This is not a recreational rental — it’s
           compensation for a road-test-only appointment.
         </div>
       </div>
@@ -197,18 +197,18 @@ export default function Legal() {
         <div style={h2}>Insurance &amp; responsibility (summary)</div>
 
         <div style={qaA}>
-          Owners provide bikes under <b>permissive use</b> (not renting). Owners should confirm details with their insurer.
+          Mentors provide bikes under <b>permissive use</b> (not renting). Mentors should confirm details with their insurer.
           Test-takers may be responsible to cover loss or damage during the test. BorrowMyBike / Class6Loaner is a matching
           platform and does not provide insurance coverage.
         </div>
 
         <div style={qaA}>
-          Owners must arrive with valid <b>registration</b>, valid <b>insurance papers</b>, and the <b>keys</b>. We recommend
-          owners verify the test-taker’s ID before the ride begins.
+          Mentors must arrive with valid <b>registration</b>, valid <b>insurance papers</b>, and the <b>keys</b>. We recommend
+          mentors verify the test-taker’s ID before the ride begins.
         </div>
 
         <div style={small}>
-          In-app messaging will be unlocked as onboarding grows so owners and test-takers can coordinate details in the
+          In-app messaging will be unlocked as onboarding grows so mentors and test-takers can coordinate details in the
           platform.
         </div>
       </div>

@@ -258,7 +258,7 @@ export default function BikeDetail() {
         <h2 style={{ margin: "0 0 10px 0" }}>Reviews</h2>
 
         <div style={{ color: "#4b5563", fontWeight: 800, marginBottom: 10 }}>
-          Bike: {avgBike == null ? "New" : `${avgBike.toFixed(1)}/5`} • Owner: {avgOwner == null ? "New" : `${avgOwner.toFixed(1)}/5`}
+          Bike: {avgBike == null ? "New" : `${avgBike.toFixed(1)}/5`} • Mentor: {avgOwner == null ? "New" : `${avgOwner.toFixed(1)}/5`}
         </div>
 
         {reviews.length === 0 ? (
@@ -275,7 +275,7 @@ export default function BikeDetail() {
                 }}
               >
                 <div style={{ fontWeight: 900, marginBottom: 6 }}>
-                  Bike: {r.bike_rating ?? "—"}/5 • Owner: {r.owner_rating ?? "—"}/5
+                  Bike: {r.bike_rating ?? "—"}/5 • Mentor: {r.owner_rating ?? "—"}/5
                 </div>
                 <div style={{ color: "#0b1220", fontWeight: 700 }}>{r.comment || "—"}</div>
               </div>

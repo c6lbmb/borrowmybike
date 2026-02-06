@@ -179,7 +179,7 @@ export default function RequestBooking() {
         id: "not_rental",
         label: (
           <>
-            I understand this is <strong>not a rental</strong>. This booking compensates a local owner for time, fuel,
+            I understand this is <strong>not a rental</strong>. This booking compensates a local mentor for time, fuel,
             and admin — <strong>strictly for registry road tests</strong>.
           </>
         ),
@@ -324,7 +324,7 @@ export default function RequestBooking() {
         <div>
           <h1 style={{ margin: 0 }}>{title}</h1>
           <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>
-            This is a request, not a confirmed booking — owner must accept.
+            This is a request, not a confirmed booking — mentor must accept.
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -358,7 +358,7 @@ export default function RequestBooking() {
 
           <div style={{ fontWeight: 800, lineHeight: 1.45 }}>
             We’re launching province-by-province so expectations and rules stay consistent for both sides.
-            Owners can list bikes anywhere in Canada, and booking opens as supply grows.
+            Mentors can list bikes anywhere in Canada, and booking opens as supply grows.
           </div>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
@@ -381,7 +381,7 @@ export default function RequestBooking() {
             </Link>
 
             <Link
-              to="/owners/start"
+              to="/mentors/start"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -579,7 +579,7 @@ export default function RequestBooking() {
           <b>Late cancellation</b> = cancel <b>5 days or less</b> before the test (including day 5).
         </div>
 
-        <div style={{ fontWeight: 950, marginTop: 12 }}>Cancellation outcomes (after the owner accepts):</div>
+        <div style={{ fontWeight: 950, marginTop: 12 }}>Cancellation outcomes (after the mentor accepts):</div>
         <ul style={{ margin: "8px 0 0 18px" }}>
           <li>
             <b>Early cancel</b>: canceller receives <b>platform credit</b> (minus <b>25%</b> admin fee). The non-cancelling party receives <b>$100 platform credit</b> to rebook / accept another request.
@@ -595,7 +595,7 @@ export default function RequestBooking() {
             <b>Test-taker fault</b>: no helmet, no hands-free, late/no-show, unfit to ride → test-taker forfeits.
           </li>
           <li>
-            <b>Owner fault</b>: invalid registration/insurance, unsafe bike, required lights not working → owner may forfeit.
+            <b>Mentor fault</b>: invalid registration/insurance, unsafe bike, required lights not working → mentor may forfeit.
           </li>
           <li>
             In fault scenarios, the at-fault party loses their fee/deposit and the other party may receive <b>$100</b> credit. If a registry fee is higher than $100, we do not cover the difference.

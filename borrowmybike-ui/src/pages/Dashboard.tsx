@@ -68,7 +68,7 @@ export default function Dashboard() {
     return (
       <div style={page}>
         <h1>Dashboard</h1>
-        <div style={{ color: "#475569", fontWeight: 650 }}>Loading your dashboard (Owner vs Borrower)…</div>
+        <div style={{ color: "#475569", fontWeight: 650 }}>Loading your dashboard (Mentor vs Borrower)…</div>
 
         <div style={card}>
           <div style={{ fontWeight: 900 }}>Signed in as</div>

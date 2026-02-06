@@ -1,0 +1,17 @@
+# Node
+node_modules/
+dist/
+build/
+.vite/
+*.log
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Supabase local
+.supabase/
+
+# OS
+.DS_Store

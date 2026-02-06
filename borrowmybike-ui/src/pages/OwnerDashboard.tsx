@@ -1,131 +1,129 @@
-// src/pages/OwnerDashboard.tsx
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { sb } from "../lib/supabase";
 import { useAuth } from "../auth/useAuth";
-import BoostModal from "../components/BoostModal";
+import { sb } from "../lib/supabase";
+import ChecklistGateModal, { type ChecklistItem } from "../components/ChecklistGateModal";
+import { acceptanceDeadlineMs, acceptanceHoursFor } from "../lib/acceptance";
+import Countdown from "../components/Countdown";
+import BookingMessages from "../components/BookingMessages";
 
-type BikeRow = {
+type BookingRow = {
   id: string;
-  owner_id: string | null;
-  make?: string | null;
-  model?: string | null;
-  year?: number | null;
-  city?: string | null;
-  is_active?: boolean | null;
-  photos?: string | null;
-};
+  bike_id: string;
+  borrower_id: string;
+  owner_id: string;
 
-type BookingRow = Record<string, any> & {
-  id: string;
-  bike_id?: string | null;
-  owner_id?: string | null;
-  borrower_id?: string | null;
+  booking_date: string | null;
+  scheduled_start_at: string | null;
 
-  booking_date?: string | null;
-  scheduled_start_at?: string | null;
+  cancelled: boolean;
+  settled: boolean;
+  completed: boolean;
 
-  duration_minutes?: number | null;
-  status?: string | null;
+  borrower_paid: boolean;
+  owner_deposit_paid: boolean;
 
-  borrower_paid?: boolean | null;
-  owner_deposit_paid?: boolean | null;
+  needs_review: boolean;
+  review_reason: string | null;
 
-  cancelled?: boolean | null;
-  cancelled_by?: string | null;
-
-  completed?: boolean | null;
-  settled?: boolean | null;
-
-  created_at?: string | null;
-  updated_at?: string | null;
+  created_at: string | null;
 
   borrower_checked_in?: boolean | null;
   owner_checked_in?: boolean | null;
-
   borrower_confirmed_complete?: boolean | null;
   owner_confirmed_complete?: boolean | null;
 
-  settled_at?: string | null;
-  settlement_outcome?: string | null;
+  cancelled_by?: string | null;
+  status?: string | null;
 };
 
-type CreditRow = {
+type BikeRow = {
   id: string;
-  created_at: string | null;
-  user_id: string;
-  booking_id: string | null;
-  amount: number;
-  status: string | null;
-  expires_at: string | null;
-  used_at: string | null;
+  owner_id: string;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  city: string | null;
+  province: string | null;
+  is_active: boolean;
 };
 
-const BUCKET = "bike-photos";
 const MS_DAY = 24 * 60 * 60 * 1000;
 
-// Backend windows
+// check-in window: 15 min before → 60 min after (must match edge fn)
 const CHECKIN_OPEN_MIN = 15;
 const CHECKIN_CLOSE_MIN = 60;
-const MIN_COMPLETE_MIN = 20;
 
-function coverVersionKey(bikeId: string) {
-  return `bike_cover_v_${bikeId}`;
-}
-function getCoverVersion(bikeId: string) {
-  try {
-    return sessionStorage.getItem(coverVersionKey(bikeId)) || "";
-  } catch {
-    return "";
-  }
-}
-function coverUrl(ownerId: string, bikeId: string) {
-  const path = `${ownerId}/${bikeId}/cover.webp`;
-  const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
-  const v = getCoverVersion(bikeId);
-  return v ? `${data.publicUrl}?v=${v}` : data.publicUrl;
-}
+// Supabase Storage (matches OwnerNew.tsx)
+const BUCKET = "bike-photos";
 
-function shortId(id?: string | null) {
-  if (!id) return "—";
-  return id.slice(0, 8) + "…";
-}
-
-function fmtDateTime(iso: string | null | undefined) {
+function fmtDateTime(iso?: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, {
+  return d.toLocaleString([], {
     year: "numeric",
     month: "short",
     day: "2-digit",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
   });
 }
 
+function shortId(id?: string | null) {
+  return id ? id.slice(0, 8) + "…" : "—";
+}
+
 function scheduledIsoFor(b: BookingRow) {
-  return (b.scheduled_start_at ?? b.booking_date ?? null) as string | null;
+  return b.scheduled_start_at ?? b.booking_date ?? null;
 }
 
-function scheduledMsFor(b: BookingRow) {
+function checkInWindowFor(b: BookingRow) {
   const iso = scheduledIsoFor(b);
-  if (!iso) return NaN;
+  if (!iso) return null;
+
   const t = new Date(iso).getTime();
-  return Number.isFinite(t) ? t : NaN;
+  if (Number.isNaN(t)) return null;
+
+  const openMs = t - CHECKIN_OPEN_MIN * 60 * 1000;
+  const closeMs = t + CHECKIN_CLOSE_MIN * 60 * 1000;
+  return { openMs, closeMs };
 }
 
-function isPastScheduled(b: BookingRow) {
-  const t = scheduledMsFor(b);
-  if (!Number.isFinite(t)) return false;
-  return t < Date.now();
+function isWithin(now: number, openMs: number, closeMs: number) {
+  return now >= openMs && now <= closeMs;
 }
 
-// Late cancel includes DAY 5 (≤ 5 days)
+// completion allowed: >= scheduled + 20 min (minimum only)
+function completionAllowedAtFor(b: BookingRow) {
+  const iso = scheduledIsoFor(b);
+  if (!iso) return null;
+
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+
+  const allowedAtMs = t + 20 * 60 * 1000;
+  return { allowedAtMs };
+}
+
+function isPendingAcceptance(b: BookingRow) {
+  return !!b.borrower_paid && !b.owner_deposit_paid && !b.cancelled && !b.settled;
+}
+
+function isConfirmedPaid(b: BookingRow) {
+  return !!b.borrower_paid && !!b.owner_deposit_paid && !b.cancelled && !b.settled && !b.completed;
+}
+
+// late cancel rule stays as-is (≤ 5 days -> FORFEIT)
 function isLateCancelForfeit(b: BookingRow) {
   if (!b.borrower_paid || !b.owner_deposit_paid) return false;
-  const t = scheduledMsFor(b);
-  if (!Number.isFinite(t)) return false;
+
+  const iso = scheduledIsoFor(b);
+  if (!iso) return false;
+
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return false;
+
   const daysUntil = (t - Date.now()) / MS_DAY;
   return daysUntil <= 5;
 }
@@ -140,844 +138,663 @@ function cancelButtonLabelFor(b: BookingRow) {
 
 function cancelTitleFor(b: BookingRow) {
   return isLateCancelForfeit(b)
-    ? 'Late cancellation (≤ 5 days, including day 5). Cancelling party forfeits. Type "FORFEIT" to proceed.'
-    : 'Early cancellation (more than 5 days). 25% admin fee applies. Type "CANCEL" to proceed.';
+    ? 'Last-minute cancellation (≤ 5 days). You will forfeit your deposit. Type "FORFEIT" to proceed.'
+    : 'Deliberate action: type "CANCEL" to cancel this booking.';
 }
 
-function checkInWindowFor(b: BookingRow) {
-  const startMs = scheduledMsFor(b);
-  if (!Number.isFinite(startMs)) return null;
-  const openMs = startMs - CHECKIN_OPEN_MIN * 60 * 1000;
-  const closeMs = startMs + CHECKIN_CLOSE_MIN * 60 * 1000;
-  return { startMs, openMs, closeMs };
+function isPastScheduled(b: BookingRow) {
+  const iso = scheduledIsoFor(b);
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return false;
+  return t < Date.now() - 2 * 60 * 60 * 1000;
 }
 
-function completionAllowedAtFor(b: BookingRow) {
-  const startMs = scheduledMsFor(b);
-  if (!Number.isFinite(startMs)) return null;
-  const allowedAtMs = startMs + MIN_COMPLETE_MIN * 60 * 1000;
-  return { startMs, allowedAtMs };
-}
-
-function isWithin(ms: number, a: number, b: number) {
-  return ms >= a && ms <= b;
+// Thumbnail url for owner’s bike cover (matches OwnerNew.tsx path)
+function coverUrl(ownerId: string, bikeId: string) {
+  const path = `${ownerId}/${bikeId}/cover.webp`;
+  const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
 }
 
 export default function OwnerDashboard() {
   const { user } = useAuth();
-  const me = user?.id ?? null;
+  const me = user?.id;
 
+  const [rows, setRows] = useState<BookingRow[]>([]);
   const [bike, setBike] = useState<BikeRow | null>(null);
-  const [bookings, setBookings] = useState<BookingRow[]>([]);
-  const [credits, setCredits] = useState<CreditRow[]>([]);
 
   const [loading, setLoading] = useState(false);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loadingBike, setLoadingBike] = useState(false);
 
+  const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [rowErr, setRowErr] = useState<Record<string, string>>({});
-  const [rowOk, setRowOk] = useState<Record<string, string>>({});
+  const [openMsgId, setOpenMsgId] = useState<string | null>(null);
 
-  const [boostOpen, setBoostOpen] = useState(false);
+  // Mentor accept checklist gate
+  const [gateOpen, setGateOpen] = useState(false);
+  const [gateBooking, setGateBooking] = useState<BookingRow | null>(null);
 
-  function setBookingErr(bookingId: string, msg: string) {
-    setRowErr((prev) => ({ ...prev, [bookingId]: msg }));
-  }
-  function clearBookingErr(bookingId: string) {
-    setRowErr((prev) => {
-      const next = { ...prev };
-      delete next[bookingId];
-      return next;
-    });
-  }
-  function setBookingOk(bookingId: string, msg: string) {
-    setRowOk((prev) => ({ ...prev, [bookingId]: msg }));
-  }
-  function clearBookingOk(bookingId: string) {
-    setRowOk((prev) => {
-      const next = { ...prev };
-      delete next[bookingId];
-      return next;
-    });
-  }
+  const ownerAcceptChecklist: ChecklistItem[] = useMemo(
+    () => [
+      { id: "ready", label: <>My bike is <b>road-test ready</b> (lights, signals, brakes, tires).</> },
+      { id: "docs", label: <>I have <b>valid registration + insurance</b> available at the registry.</> },
+      { id: "timing", label: <>I understand I must be on time and check-in is limited to the allowed window.</> },
+      { id: "rules", label: <>I understand cancellation / fault consequences and that this is <b>road tests only</b> (not rentals).</> },
+    ],
+    [],
+  );
 
-  async function loadMyBike() {
+  async function load() {
     if (!me) return;
-    const res = await sb
-      .from("bikes")
-      .select("id,owner_id,make,model,year,city,is_active,photos")
-      .eq("owner_id", me)
-      .limit(1)
-      .maybeSingle();
-
-    if (res.error) throw res.error;
-    setBike((res.data as any) ?? null);
-  }
-
-  async function loadOwnerBookings() {
-    if (!me) return;
-
-    const q = sb.from("bookings").select("*").eq("owner_id", me).limit(200);
-
-    let res = await q.order("scheduled_start_at", { ascending: false });
-    if (res.error && res.error.message?.toLowerCase().includes("does not exist")) {
-      res = await q.order("booking_date", { ascending: false });
-    }
-
-    if (res.error) throw res.error;
-    setBookings((res.data as any[]) ?? []);
-  }
-
-  async function loadMyCredits() {
-    if (!me) return;
-
-    const res = await sb
-      .from("credits")
-      .select("id,created_at,user_id,booking_id,amount,status,expires_at,used_at")
-      .eq("user_id", me)
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (res.error) throw res.error;
-
-    const raw = (((res.data as any) || []) as CreditRow[]).filter((c) => {
-      if (c.used_at) return false;
-      if (c.status && c.status !== "available") return false;
-      if (c.expires_at) {
-        const t = new Date(c.expires_at).getTime();
-        if (!Number.isNaN(t) && t < Date.now()) return false;
-      }
-      return true;
-    });
-
-    setCredits(raw);
-  }
-
-  async function refresh() {
-    if (!me) return;
-    setLoadErr(null);
     setLoading(true);
+    setErr(null);
+
     try {
-      await Promise.all([loadMyBike(), loadOwnerBookings(), loadMyCredits()]);
+      const res = await sb
+        .from("bookings")
+        .select(
+          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status",
+        )
+        .eq("owner_id", me)
+        .order("created_at", { ascending: false });
+
+      if (res.error) throw res.error;
+      setRows(((res.data as any) || []) as BookingRow[]);
     } catch (e: any) {
-      setLoadErr(e?.message ?? "Failed to load owner dashboard.");
+      setErr(e?.message || "Failed to load bookings");
+      setRows([]);
     } finally {
       setLoading(false);
     }
   }
 
+  async function loadMyBike() {
+    if (!me) return;
+    setLoadingBike(true);
+    try {
+      const res = await sb
+        .from("bikes")
+        .select("id, owner_id, make, model, year, city, province, is_active")
+        .eq("owner_id", me)
+        .limit(1)
+        .maybeSingle();
+
+      if (res.error) throw res.error;
+      setBike((res.data as BikeRow | null) || null);
+    } catch {
+      setBike(null);
+    } finally {
+      setLoadingBike(false);
+    }
+  }
+
   useEffect(() => {
-    refresh();
+    load();
+    loadMyBike();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
 
-  const { requests, upcoming, history } = useMemo(() => {
-    const req: BookingRow[] = [];
-    const up: BookingRow[] = [];
-    const hist: BookingRow[] = [];
+  async function checkInAsOwner(b: BookingRow) {
+    const w = checkInWindowFor(b);
+    const now = Date.now();
+    const checkInOpen = w ? isWithin(now, w.openMs, w.closeMs) : false;
 
-    for (const b of bookings) {
-      const cancelled = !!b.cancelled;
-      const completed = !!b.completed;
-      const settled = !!b.settled;
-
-      const borrowerPaid = !!b.borrower_paid;
-      const ownerPaid = !!b.owner_deposit_paid;
-
-      const past = isPastScheduled(b);
-
-      if (cancelled || completed || settled || past) {
-        hist.push(b);
-        continue;
-      }
-
-      if (borrowerPaid && !ownerPaid) {
-        req.push(b);
-        continue;
-      }
-
-      if (borrowerPaid && ownerPaid) {
-        up.push(b);
-        continue;
-      }
-
-      hist.push(b);
-    }
-
-    const sortDesc = (a: BookingRow, b: BookingRow) => {
-      const ta = new Date((scheduledIsoFor(a) || a.created_at || "") as string).getTime();
-      const tb = new Date((scheduledIsoFor(b) || b.created_at || "") as string).getTime();
-      return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
-    };
-
-    req.sort(sortDesc);
-    up.sort(sortDesc);
-    hist.sort(sortDesc);
-
-    return { requests: req, upcoming: up, history: hist };
-  }, [bookings]);
-
-  async function acceptBooking(b: BookingRow) {
-    if (!me) return;
-
-    const bookingId = b.id;
-    const bikeId = b.bike_id ?? null;
-
-    clearBookingErr(bookingId);
-    clearBookingOk(bookingId);
-
-    if (isPastScheduled(b)) {
-      setBookingErr(bookingId, "This request is expired (scheduled time already passed).");
+    if (!checkInOpen) {
+      alert("Check-in is only available 15 minutes before until 60 minutes after the scheduled start time.");
       return;
     }
 
-    if (b.owner_deposit_paid) {
-      setBookingErr(bookingId, "Already accepted (deposit paid). Hit Refresh.");
+    setBusyId(b.id);
+    setErr(null);
+    try {
+      const { error } = await sb.functions.invoke("check-in", {
+        body: { booking_id: b.id, role: "owner" },
+      });
+      if (error) throw error;
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "Check-in failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function confirmBikeReturnedAsOwner(b: BookingRow) {
+    const borrowerChecked = !!b.borrower_checked_in;
+    const ownerChecked = !!b.owner_checked_in;
+
+    if (!borrowerChecked || !ownerChecked) {
+      alert("Both parties must check in first.");
       return;
     }
 
-    if (!bookingId || !bikeId) {
-      setBookingErr(bookingId, "Missing booking_id or bike_id on this booking row.");
+    const comp = completionAllowedAtFor(b);
+    const now = Date.now();
+    if (comp && now < comp.allowedAtMs) {
+      alert(`Too early. You can confirm possession after ${fmtDateTime(new Date(comp.allowedAtMs).toISOString())}.`);
       return;
     }
 
-    setBusyId(bookingId);
+    setBusyId(b.id);
+    setErr(null);
+    try {
+      const { error } = await sb.functions.invoke("complete-booking", {
+        body: { booking_id: b.id, role: "owner" },
+      });
+      if (error) throw error;
 
-    const { data, error } = await sb.functions.invoke("create-owner-deposit-payment", {
-      body: { booking_id: bookingId, owner_id: me, bike_id: bikeId },
-    });
-
-    setBusyId(null);
-
-    if (error) {
-      const msg = error.message || "Failed to accept booking.";
-      if (msg.toLowerCase().includes("non-2xx")) {
-        setBookingErr(
-          bookingId,
-          "Accept failed (Edge Function non-2xx). If you already paid the deposit, hit Refresh — it should move to Upcoming."
-        );
-      } else {
-        setBookingErr(bookingId, msg);
-      }
-      return;
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "Confirm possession failed");
+    } finally {
+      setBusyId(null);
     }
-
-    const url = (data as any)?.checkout_url ?? null;
-    if (url) {
-      window.location.assign(url);
-      return;
-    }
-
-    await refresh();
   }
 
   async function cancelBookingAsOwner(b: BookingRow) {
-    if (!me) return;
-
-    const bookingId = b.id;
-    clearBookingErr(bookingId);
-    clearBookingOk(bookingId);
-
-    if (b.cancelled) {
-      setBookingErr(bookingId, "Already cancelled. Hit Refresh.");
+    // Once both checked in, FORFEIT should be disabled (your rule)
+    const borrowerChecked = !!b.borrower_checked_in;
+    const ownerChecked = !!b.owner_checked_in;
+    if (borrowerChecked && ownerChecked) {
+      alert("FORFEIT is disabled once both parties have checked in.");
       return;
     }
 
     const keyword = cancelKeywordFor(b);
     const typed = prompt(`Type "${keyword}" to cancel this booking:`);
+    if ((typed || "").trim().toUpperCase() !== keyword) return;
 
-    if (!typed) return;
-    if (typed.trim().toUpperCase() !== keyword) {
-      alert(`Cancel aborted. You must type ${keyword} exactly.`);
-      return;
+    setBusyId(b.id);
+    setErr(null);
+    try {
+      const { error } = await sb.functions.invoke("cancel-booking", {
+        body: { booking_id: b.id, cancelled_by: "owner" },
+      });
+      if (error) throw error;
+      alert("Cancelled.");
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "Cancel failed");
+    } finally {
+      setBusyId(null);
     }
-
-    setBusyId(bookingId);
-
-    const { error } = await sb.functions.invoke("cancel-booking", {
-      body: { booking_id: b.id, cancelled_by: "owner" },
-    });
-
-    setBusyId(null);
-
-    if (error) {
-      const msg = error.message || "Failed to cancel booking.";
-      setBookingErr(bookingId, msg);
-      return;
-    }
-
-    setBookingOk(bookingId, "Cancelled ✅");
-    await refresh();
   }
 
-  async function checkInAsOwner(b: BookingRow) {
-    if (!me) return;
-    const bookingId = b.id;
+  async function doAcceptWithDeposit(b: BookingRow) {
+    setBusyId(b.id);
+    setErr(null);
+    try {
+      const { data, error } = await sb.functions.invoke("create-owner-deposit-payment", {
+        body: { booking_id: b.id },
+      });
+      if (error) throw error;
 
-    clearBookingErr(bookingId);
-    clearBookingOk(bookingId);
+      const url = (data as any)?.checkout_url;
+      if (url) window.location.href = url;
 
-    const w = checkInWindowFor(b);
-    if (!w) {
-      setBookingErr(bookingId, "Missing scheduled time; cannot check in.");
-      return;
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "Accept failed");
+    } finally {
+      setBusyId(null);
     }
-
-    const now = Date.now();
-    if (!isWithin(now, w.openMs, w.closeMs)) {
-      setBookingErr(
-        bookingId,
-        `Check-in is only available from ${fmtDateTime(new Date(w.openMs).toISOString())} to ${fmtDateTime(
-          new Date(w.closeMs).toISOString()
-        )}.`
-      );
-      return;
-    }
-
-    setBusyId(bookingId);
-
-    const { error } = await sb.functions.invoke("check-in", {
-      body: { booking_id: bookingId, actor: "owner" },
-    });
-
-    setBusyId(null);
-
-    if (error) {
-      setBookingErr(bookingId, error.message || "Check-in failed.");
-      return;
-    }
-
-    setBookingOk(bookingId, "Checked in ✅");
-    await refresh();
   }
 
-  async function confirmBikeReturnedAsOwner(b: BookingRow) {
-    if (!me) return;
-    const bookingId = b.id;
+  const sorted = useMemo(() => rows, [rows]);
 
-    clearBookingErr(bookingId);
-    clearBookingOk(bookingId);
+  const upcoming = sorted.filter((b) => isConfirmedPaid(b));
+  const pending = sorted.filter((b) => isPendingAcceptance(b));
+  const history = sorted.filter((b) => b.cancelled || b.settled || b.completed || isPastScheduled(b));
 
-    const typed = prompt('Type "RETURNED" to confirm YOUR bike is returned:');
-    if (!typed) return;
-    if (typed.trim().toUpperCase() !== "RETURNED") {
-      alert("Aborted. You must type RETURNED exactly.");
-      return;
-    }
+  const cardShell: React.CSSProperties = {
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
+    padding: 16,
+    background: "white",
+  };
 
-    const comp = completionAllowedAtFor(b);
-    if (!comp) {
-      setBookingErr(bookingId, "Missing scheduled time; cannot confirm return.");
-      return;
-    }
+  const btnPrimary: React.CSSProperties = {
+    padding: "10px 14px",
+    borderRadius: 14,
+    border: "1px solid #0f172a",
+    background: "#0f172a",
+    color: "white",
+    fontWeight: 950,
+    cursor: "pointer",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+  };
 
-    const now = Date.now();
-    if (now < comp.allowedAtMs) {
-      setBookingErr(bookingId, `Too early to confirm return. Available at ${fmtDateTime(new Date(comp.allowedAtMs).toISOString())}.`);
-      return;
-    }
+  const btnSecondary: React.CSSProperties = {
+    padding: "10px 14px",
+    borderRadius: 14,
+    border: "1px solid #cbd5e1",
+    background: "white",
+    fontWeight: 950,
+    cursor: "pointer",
+    textDecoration: "none",
+    color: "#0f172a",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+  };
 
-    if (!b.owner_checked_in || !b.borrower_checked_in) {
-      setBookingErr(bookingId, "Both parties must check in before confirming return.");
-      return;
-    }
-
-    setBusyId(bookingId);
-
-    const { data, error } = await sb.functions.invoke("complete-booking", {
-      body: { booking_id: bookingId, actor: "owner" },
-    });
-
-    setBusyId(null);
-
-    if (error) {
-      setBookingErr(bookingId, error.message || "Failed to confirm return.");
-      return;
-    }
-
-    const message = (data as any)?.message ?? "Saved ✅";
-    setBookingOk(bookingId, message);
-    await refresh();
-  }
-
-  const bikeTitle = useMemo(() => {
-    if (!bike) return "—";
-    const label = [bike.year, bike.make, bike.model].filter(Boolean).join(" ");
-    return label || "Your bike";
-  }, [bike]);
-
-  const bikeCover = useMemo(() => {
-    if (!bike?.id || !me) return null;
-    return coverUrl(me, bike.id);
-  }, [bike?.id, me]);
-
-  const creditCard = (
-    <div
-      style={{
-        marginTop: 16,
-        border: "1px solid #e2e8f0",
-        borderRadius: 18,
-        padding: 16,
-        background: "white",
-      }}
-    >
-      <div style={{ fontWeight: 1000, fontSize: 18 }}>Credits </div>
-      <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
-        Credits automatically apply at checkout before Stripe. Unused credit may be returned at end of season (per policy).
-        {" "}
-        <Link to="/legal" style={{ fontWeight: 950 }}>Rules &amp; Process →</Link>
-      </div>
-
-      {credits.length === 0 ? (
-        <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No credits available.</div>
-      ) : (
-        <div style={{ marginTop: 12, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
-            <thead>
-              <tr style={{ textAlign: "left", color: "#0f172a" }}>
-                <th style={{ paddingBottom: 10 }}>Amount</th>
-                <th style={{ paddingBottom: 10 }}>From booking</th>
-                <th style={{ paddingBottom: 10 }}>Created</th>
-                <th style={{ paddingBottom: 10 }}>Expires</th>
-                <th style={{ paddingBottom: 10 }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {credits.map((c) => (
-                <tr key={c.id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                  <td style={{ padding: "10px 0", fontWeight: 1000 }}>${Number(c.amount).toFixed(2)}</td>
-                  <td style={{ padding: "10px 0", fontWeight: 900 }}>{shortId(c.booking_id)}</td>
-                  <td style={{ padding: "10px 0", fontWeight: 800, color: "#334155" }}>{fmtDateTime(c.created_at)}</td>
-                  <td style={{ padding: "10px 0", fontWeight: 800, color: "#334155" }}>{fmtDateTime(c.expires_at)}</td>
-                  <td style={{ padding: "10px 0", fontWeight: 900, color: "#166534" }}>{c.status || "available"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+  const bikeTitle = bike ? `${bike.year || ""} ${bike.make || ""} ${bike.model || ""}`.trim() || "Your bike" : "My Bike";
+  const bikeThumb = bike && me ? coverUrl(me, bike.id) : null;
 
   return (
-    <div style={{ maxWidth: 1050, margin: "0 auto", padding: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
+    <div style={{ padding: "2rem" }}>
+      <ChecklistGateModal
+        open={gateOpen}
+        title="Before you accept…"
+        intro={
+          <>
+            You’re agreeing your bike is road-test ready and you understand the cancellation / fault rules.
+            You’ll place the <b>$150 mentor deposit</b> next (credit may apply).
+
+            <div style={{ marginTop: 14, padding: 12, border: "1px solid #e2e8f0", borderRadius: 14, background: "#f8fafc" }}>
+              <div style={{ fontWeight: 950, marginBottom: 6 }}>Deposit preference</div>
+              <div style={{ color: "#475569", fontWeight: 800, marginBottom: 10 }}>
+                Default is <b>keep on platform</b>. You can change this later, but immediate Stripe refunds are only possible when the original payment is still recent.
+              </div>
+
+              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 10, cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="depositpref"
+                  checked={gateDepositChoice === "keep"}
+                  onChange={() => setGateDepositChoice("keep")}
+                />
+                <div>
+                  <div style={{ fontWeight: 950 }}>Keep on platform</div>
+                  <div style={{ color: "#475569", fontWeight: 800 }}>Becomes platform credit. You can request a withdrawal later.</div>
+                </div>
+              </label>
+
+              <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="depositpref"
+                  checked={gateDepositChoice === "refund"}
+                  onChange={() => setGateDepositChoice("refund")}
+                />
+                <div>
+                  <div style={{ fontWeight: 900 }}>Refund to card</div>
+                  <div style={{ color: "#475569", fontWeight: 800 }}>
+                    We’ll attempt an automatic Stripe refund right after settlement when possible. If it’s requested much later, we’ll notify support for manual e‑transfer.
+                  </div>
+                </div>
+              </label>
+            </div>
+          </>
+        }
+        requiredItems={ownerAcceptChecklist}
+        footerNote={
+          <>
+            If you accept and don’t show up, or your bike isn’t road-worthy at the registry, your deposit may be used to compensate the test-taker.
+          </>
+        }
+        confirmText="I agree — continue to deposit"
+        cancelText="Not now"
+        onCancel={() => {
+          setGateOpen(false);
+          setGateBooking(null);
+        }}
+        onConfirm={() => {
+          const b = gateBooking;
+          const choice = gateDepositChoice;
+          setGateOpen(false);
+          setGateBooking(null);
+          if (!b) return;
+
+          void (async () => {
+            // Persist preference first (so settle-booking sees it), then proceed to deposit checkout.
+            await persistOwnerDepositChoice(b.id, choice);
+            await doAcceptWithDeposit(b);
+          })();
+        }}
+      />
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ margin: 0 }}>Owner Dashboard</h1>
-          <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
-            Your bike + booking requests. Owner acceptance window is enforced.
-          </div>
-          <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800, fontSize: 13 }}>
-            Want the full “no surprises” breakdown? <Link to="/legal" style={{ fontWeight: 950 }}>Rules &amp; Process →</Link>
-          </div>
+          <div style={{ fontSize: 28, fontWeight: 1000 }}>Mentor Dashboard</div>
+          <div style={{ marginTop: 4, color: "#64748b", fontWeight: 800 }}>Your bookings + acceptance window.</div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link to="/browse" style={{ fontWeight: 900 }}>
             Browse →
           </Link>
           <button
-            onClick={refresh}
-            disabled={loading}
             style={{
-              padding: "10px 14px",
+              padding: "10px 12px",
               borderRadius: 14,
-              border: "1px solid #0f172a",
-              background: "#0f172a",
-              color: "white",
-              fontWeight: 950,
+              border: "1px solid #cbd5e1",
+              fontWeight: 900,
               cursor: "pointer",
-              opacity: loading ? 0.7 : 1,
+              background: "white",
             }}
+            onClick={() => {
+              load();
+              loadMyBike();
+            }}
+            disabled={loading}
           >
             {loading ? "Loading…" : "Refresh"}
           </button>
         </div>
       </div>
 
-      {loadErr ? (
-        <div
-          style={{
-            marginTop: 14,
-            padding: 12,
-            borderRadius: 12,
-            border: "1px solid #fecaca",
-            background: "#fef2f2",
-            color: "#991b1b",
-            fontWeight: 900,
-          }}
-        >
-          Error: {loadErr}
+      {err && (
+        <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #fecaca", background: "#fff1f2" }}>
+          <div style={{ fontWeight: 900, color: "#b00020" }}>Error</div>
+          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 800 }}>{err}</div>
         </div>
-      ) : null}
+      )}
 
-      {creditCard}
-
-      {/* My Bike */}
-      <div
-        style={{
-          marginTop: 16,
-          border: "1px solid #e2e8f0",
-          borderRadius: 18,
-          padding: 16,
-          background: "white",
-        }}
-      >
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>My Bike</div>
+      {/* My Bike (fast access + thumbnail) */}
+      <div style={{ marginTop: 16, ...cardShell }}>
+        <div style={{ fontWeight: 1000, fontSize: 18 }}>{bikeTitle}</div>
         <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
-          One bike per owner (for now). You can edit details any time.
+          Quick access to your listing. Keep it up to date so test-takers can book confidently.
         </div>
 
-        <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button
-            onClick={refresh}
-            disabled={loading}
-            style={{
-              padding: "10px 14px",
-              borderRadius: 14,
-              border: "1px solid #cbd5e1",
-              background: "white",
-              fontWeight: 900,
-              cursor: "pointer",
-              opacity: loading ? 0.7 : 1,
-            }}
-          >
-            Reload bike
-          </button>
+        {loadingBike ? (
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>Loading…</div>
+        ) : bike ? (
+          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "120px 1fr", gap: 14, alignItems: "center" }}>
+            <div
+              style={{
+                width: 120,
+                height: 90,
+                borderRadius: 14,
+                overflow: "hidden",
+                border: "1px solid #e2e8f0",
+                background: "#f1f5f9",
+              }}
+            >
+              {bikeThumb ? (
+                <img
+                  src={bikeThumb}
+                  alt="Bike cover"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  onError={(e) => {
+                    // If no public object exists, show empty state (avoid broken image icon)
+                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              ) : null}
+              {!bikeThumb ? (
+                <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 900 }}>
+                  No photo
+                </div>
+              ) : null}
+            </div>
 
-          <Link
-            to="/owners/start"
-            style={{
-              padding: "10px 14px",
-              borderRadius: 14,
-              border: "1px solid #0f172a",
-              background: "#0f172a",
-              color: "white",
-              fontWeight: 950,
-              textDecoration: "none",
-            }}
-          >
-            Edit bike
-          </Link>
-
-          <button
-            onClick={() => setBoostOpen(true)}
-            style={{
-              padding: "10px 14px",
-              borderRadius: 14,
-              border: "1px solid #cbd5e1",
-              background: "white",
-              fontWeight: 900,
-              cursor: "pointer",
-              opacity: 0.6,
-            }}
-            disabled
-            title="Boost coming soon"
-          >
-            Boost (soon)
-          </button>
-
-          <Link
-            to="/legal#cancellations"
-            style={{
-              padding: "10px 14px",
-              borderRadius: 14,
-              border: "1px solid #cbd5e1",
-              background: "white",
-              fontWeight: 900,
-              textDecoration: "none",
-              color: "#0f172a",
-            }}
-          >
-            Cancellation policy
-          </Link>
-
-          <Link
-            to="/legal"
-            style={{
-              padding: "10px 14px",
-              borderRadius: 14,
-              border: "1px solid #cbd5e1",
-              background: "white",
-              fontWeight: 900,
-              textDecoration: "none",
-              color: "#0f172a",
-            }}
-          >
-            Rules &amp; Process
-          </Link>
-        </div>
-
-        <div style={{ marginTop: 14, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-          <div
-            style={{
-              width: 150,
-              height: 95,
-              borderRadius: 14,
-              overflow: "hidden",
-              border: "1px solid #e2e8f0",
-              background: "#f1f5f9",
-            }}
-          >
-            {bikeCover ? (
-              <img src={bikeCover} alt="Bike" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-            ) : (
-              <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 900 }}>
-                No photo
+            <div>
+              <div style={{ color: "#64748b", fontWeight: 800 }}>
+                {bike.city || "—"}, {bike.province || "—"} • {bike.is_active ? "Active ✅" : "Inactive ❌"}
               </div>
-            )}
-          </div>
 
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <div style={{ fontWeight: 1000, fontSize: 18 }}>{bikeTitle}</div>
-            <div style={{ marginTop: 4, color: "#64748b", fontWeight: 800 }}>
-              city: {bike?.city || "—"} • id: {bike?.id ? shortId(bike.id) : "—"} • active: {bike?.is_active ? "Yes" : "No"}
-            </div>
-            <div style={{ marginTop: 4, color: "#64748b", fontWeight: 750 }}>
-              Photo updates after clicking Save bike on the edit page.
+              <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Link to="/mentors/new" style={btnPrimary}>
+                  Edit my bike →
+                </Link>
+                <Link to="/mentors" style={btnSecondary}>
+                  Mentor info →
+                </Link>
+              </div>
             </div>
           </div>
-
-          <div style={{ minWidth: 140, textAlign: "left" }}>
-            <div style={{ fontWeight: 900 }}>Boost status</div>
-            <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>—</div>
+        ) : (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ color: "#64748b", fontWeight: 800 }}>No bike listed yet.</div>
+            <div style={{ marginTop: 12 }}>
+              <Link to="/mentors/new" style={btnPrimary}>
+                Start / Add my bike →
+              </Link>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Booking Requests */}
-      <div
-        style={{
-          marginTop: 16,
-          border: "1px solid #e2e8f0",
-          borderRadius: 18,
-          padding: 16,
-          background: "white",
-        }}
-      >
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Booking Requests</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
-          “Accept” opens checkout for your $150 deposit (unless credit covers it). Expired requests automatically move to History.
-        </div>
+      {/* Requests */}
+      <div style={{ marginTop: 16, ...cardShell }}>
+        <div style={{ fontWeight: 1000, fontSize: 18 }}>Requests</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>Booking requests waiting for your acceptance (mentor deposit).</div>
 
-        {requests.length === 0 ? (
+        {pending.length === 0 ? (
           <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No pending requests.</div>
         ) : (
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-            {requests.map((b) => {
-              const whenIso = scheduledIsoFor(b);
-              const when = (whenIso || "") as string;
-              const isBusy = busyId === b.id;
-              const disabled = isBusy || loading;
+          <div style={{ marginTop: 12 }}>
+            {pending.map((b) => (
+              <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
+                <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
+                <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>scheduled: {fmtDateTime(scheduledIsoFor(b))}</div>
 
-              return (
-                <div
-                  key={b.id}
-                  style={{
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 14,
-                    padding: 12,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
-                    <div style={{ marginTop: 4, color: "#64748b", fontWeight: 800 }}>
-                      scheduled: {fmtDateTime(when)} • bike: {b.bike_id ? shortId(String(b.bike_id)) : "—"}
-                    </div>
-
-                    {rowErr[b.id] ? <div style={{ marginTop: 8, color: "#991b1b", fontWeight: 900 }}>{rowErr[b.id]}</div> : null}
-                    {rowOk[b.id] ? <div style={{ marginTop: 8, color: "#166534", fontWeight: 900 }}>{rowOk[b.id]}</div> : null}
-
-                    <div style={{ marginTop: 8, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
-                      By accepting, you agree you’ve read the Rules &amp; Process. <Link to="/legal" style={{ fontWeight: 950 }}>View →</Link>
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <button
-                      onClick={() => acceptBooking(b)}
-                      disabled={disabled}
-                      style={{
-                        padding: "10px 14px",
-                        borderRadius: 14,
-                        border: "1px solid #0f172a",
-                        background: "#0f172a",
-                        color: "white",
-                        fontWeight: 950,
-                        cursor: "pointer",
-                        opacity: disabled ? 0.7 : 1,
-                      }}
-                    >
-                      {isBusy ? "…" : "Accept"}
-                    </button>
-
-                    <button
-                      onClick={() => cancelBookingAsOwner(b)}
-                      disabled={disabled}
-                      title={cancelTitleFor(b)}
-                      style={{
-                        padding: "10px 14px",
-                        borderRadius: 14,
-                        border: "1px solid #cbd5e1",
-                        background: "white",
-                        fontWeight: 950,
-                        cursor: "pointer",
-                        opacity: disabled ? 0.7 : 1,
-                      }}
-                    >
-                      {isBusy ? "…" : cancelButtonLabelFor(b)}
-                    </button>
-                  </div>
+                <div style={{ marginTop: 10, color: "#475569", fontWeight: 800 }}>
+                  “Accept” opens checkout for your $150 deposit (unless credit covers it).
                 </div>
-              );
-            })}
+
+                {(() => {
+                  const iso = scheduledIsoFor(b);
+                  const scheduledMs = iso ? new Date(iso).getTime() : NaN;
+                  const deadline = acceptanceDeadlineMs({
+                    createdAtIso: b.created_at || null,
+                    scheduledIso: iso || null,
+                  });
+
+                  const acceptanceExpired = deadline !== null && Date.now() > deadline;
+                  // Hard stop close to test time: don't allow last‑second accepts.
+                  const tooLate = Number.isFinite(scheduledMs) && Date.now() > scheduledMs - 15 * 60 * 1000;
+
+                  return (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontWeight: 900 }}>
+                        Acceptance window: {deadline ? <Countdown deadlineMs={deadline} /> : "—"}
+                      </div>
+                      {(acceptanceExpired || tooLate) && (
+                        <div style={{ marginTop: 6, color: "#b91c1c", fontWeight: 900 }}>
+                          This request is expired.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => {
+                      const iso = scheduledIsoFor(b);
+                      const scheduledMs = iso ? new Date(iso).getTime() : NaN;
+                      const deadline = acceptanceDeadlineMs({
+                        createdAtIso: b.created_at || null,
+                        scheduledIso: iso || null,
+                      });
+
+                      if (deadline !== null && Date.now() > deadline) {
+                        setErr("Acceptance window expired.");
+                        return;
+                      }
+
+                      if (Number.isFinite(scheduledMs) && Date.now() > scheduledMs - 15 * 60 * 1000) {
+                        setErr("Too late to accept for this time. Ask the borrower to rebook.");
+                        return;
+                      }
+
+                      setGateBooking(b);
+                      setGateDepositChoice(b.owner_deposit_choice === "refund" ? "refund" : "keep");
+                      setGateOpen(true);
+                    }}
+
+                    disabled={(() => {
+                      if (busyId === b.id) return true;
+                      const iso = scheduledIsoFor(b);
+                      const scheduledMs = iso ? new Date(iso).getTime() : NaN;
+                      const deadline = acceptanceDeadlineMs({
+                        createdAtIso: b.created_at || null,
+                        scheduledIso: iso || null,
+                      });
+                      const acceptanceExpired = deadline !== null && Date.now() > deadline;
+                      const tooLate = Number.isFinite(scheduledMs) && Date.now() > scheduledMs - 15 * 60 * 1000;
+                      return acceptanceExpired || tooLate;
+                    })()}
+
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 14,
+                      border: "1px solid #0f172a",
+                      background: "#0f172a",
+                      color: "white",
+                      fontWeight: 950,
+                      cursor: "pointer",
+                      opacity: busyId === b.id ? 0.7 : 1,
+                    }}
+                  >
+                    {busyId === b.id ? "…" : "Accept (pay deposit)"}
+                  </button>
+
+                  <button
+                    onClick={() => cancelBookingAsOwner(b)}
+                    disabled={busyId === b.id}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 14,
+                      border: "1px solid #cbd5e1",
+                      background: "white",
+                      fontWeight: 950,
+                      cursor: "pointer",
+                      opacity: busyId === b.id ? 0.7 : 1,
+                    }}
+                  >
+                    {busyId === b.id ? "…" : cancelButtonLabelFor(b)}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
       {/* Upcoming / Confirmed */}
-      <div
-        style={{
-          marginTop: 16,
-          border: "1px solid #e2e8f0",
-          borderRadius: 18,
-          padding: 16,
-          background: "white",
-        }}
-      >
+      <div style={{ marginTop: 16, ...cardShell }}>
         <div style={{ fontWeight: 1000, fontSize: 18 }}>Upcoming / Confirmed</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>These are accepted bookings (mentor deposit paid).</div>
         <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
-          These are accepted bookings (owner deposit paid).
-          <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
-            You receive $100 once the test is completed and you confirm <b>YOUR</b> bike is returned.
-          </div>
+          You receive <b>$100</b> once the test is completed and you confirm <b>YOUR</b> bike is returned.
         </div>
 
         {upcoming.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No upcoming bookings yet.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No upcoming bookings.</div>
         ) : (
-          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+          <div style={{ marginTop: 12 }}>
             {upcoming.map((b) => {
-              const whenIso = scheduledIsoFor(b);
-              const when = (whenIso || "") as string;
-
               const isBusy = busyId === b.id;
-              const disabled = isBusy || loading;
+
+              const borrowerChecked = !!b.borrower_checked_in;
+              const ownerChecked = !!b.owner_checked_in;
+              const ownerPossession = !!b.owner_confirmed_complete;
+              const borrowerComplete = !!b.borrower_confirmed_complete;
 
               const w = checkInWindowFor(b);
               const now = Date.now();
-              const checkinOpen = w ? isWithin(now, w.openMs, w.closeMs) : false;
-
-              const ownerChecked = !!b.owner_checked_in;
-              const borrowerChecked = !!b.borrower_checked_in;
+              const checkInOpen = w ? isWithin(now, w.openMs, w.closeMs) : false;
 
               const comp = completionAllowedAtFor(b);
               const canConfirmTime = comp ? now >= comp.allowedAtMs : false;
 
-              const ownerConfirmed = !!b.owner_confirmed_complete;
-              const borrowerConfirmed = !!b.borrower_confirmed_complete;
-
-              const canConfirm =
-                !disabled &&
-                canConfirmTime &&
-                ownerChecked &&
-                borrowerChecked &&
-                !ownerConfirmed &&
-                !b.cancelled &&
-                !b.completed;
-
-              const checkinHelp = (() => {
-                if (!w) return "Missing scheduled time.";
-                if (ownerChecked) return "You are checked in ✅";
-                if (checkinOpen) return "Check-in is open now.";
-                if (now < w.openMs) return `Check-in opens at ${fmtDateTime(new Date(w.openMs).toISOString())}.`;
-                return `Check-in closed at ${fmtDateTime(new Date(w.closeMs).toISOString())}.`;
-              })();
-
-              const confirmHelp = (() => {
-                if (ownerConfirmed) return "You already confirmed possession ✅";
-                if (!ownerChecked || !borrowerChecked) return "Both parties must check in first.";
-                if (!comp) return "Missing scheduled time.";
-                if (now < comp.allowedAtMs) return `Available at ${fmtDateTime(new Date(comp.allowedAtMs).toISOString())} (20 min after start).`;
-                return "Ready.";
-              })();
+              const canConfirmPossession = borrowerChecked && ownerChecked && canConfirmTime && !ownerPossession;
+              const disableForfeit = borrowerChecked && ownerChecked;
 
               return (
-                <div
-                  key={b.id}
-                  style={{
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 14,
-                    padding: 12,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                  }}
-                >
-                  <div style={{ minWidth: 280 }}>
-                    <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
-                    <div style={{ marginTop: 4, color: "#64748b", fontWeight: 800 }}>
-                      scheduled: {fmtDateTime(when)} • bike: {b.bike_id ? shortId(String(b.bike_id)) : "—"}
-                    </div>
+                <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
+                  <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
+                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
+                    scheduled: {fmtDateTime(scheduledIsoFor(b))} • bike: {shortId(b.bike_id)}
+             {(() => {
+               const scheduledIso = scheduledIsoFor(b);
+               const scheduledMs = scheduledIso ? new Date(scheduledIso).getTime() : NaN;
+               const inPast = Number.isFinite(scheduledMs) && scheduledMs < Date.now();
 
-                    <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <div style={{ fontWeight: 900, color: ownerChecked ? "#166534" : "#475569" }}>
-                        Owner check-in: {ownerChecked ? "✅" : "—"}
-                      </div>
-                      <div style={{ fontWeight: 900, color: borrowerChecked ? "#166534" : "#475569" }}>
-                        Test-taker check-in: {borrowerChecked ? "✅" : "—"}
-                      </div>
-                      <div style={{ fontWeight: 900, color: ownerConfirmed ? "#166534" : "#475569" }}>
-                        Owner possession: {ownerConfirmed ? "✅" : "—"}
-                      </div>
-                      <div style={{ fontWeight: 900, color: borrowerConfirmed ? "#166534" : "#475569" }}>
-                        Test-taker complete: {borrowerConfirmed ? "✅" : "—"}
-                      </div>
-                    </div>
+               const hours = acceptanceHoursFor(scheduledIso || undefined);
+               const deadline = acceptanceDeadlineMs(b.created_at || null, scheduledIso || null);
 
-                    {rowErr[b.id] ? <div style={{ marginTop: 8, color: "#991b1b", fontWeight: 900 }}>{rowErr[b.id]}</div> : null}
-                    {rowOk[b.id] ? <div style={{ marginTop: 8, color: "#166534", fontWeight: 900 }}>{rowOk[b.id]}</div> : null}
+               return (
+                 <div style={{ marginTop: 8 }}>
+                   {inPast && (
+                     <div style={{ color: "#b00020", fontWeight: 900 }}>
+                       This request is expired (scheduled time already passed).
+                     </div>
+                   )}
 
-                    <div style={{ marginTop: 8, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
-                      {ownerConfirmed && !borrowerConfirmed
-                        ? "Waiting for test-taker to confirm completion in the app."
-                        : b.completed
-                        ? "Booking completed."
-                        : "Tip: both parties must check in before you can confirm possession."}
-                      {" "}
-                      <Link to="/legal" style={{ fontWeight: 950 }}>Rules →</Link>
-                    </div>
+                   {deadline && !inPast && (
+                     <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+                       Accept window ({hours}h): <Countdown deadlineMs={deadline} />
+                     </div>
+                   )}
+                 </div>
+               );
+             })()}
+    
                   </div>
 
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ marginTop: 10, fontWeight: 900, color: "#0f172a" }}>
+                    Mentor check-in: {ownerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Test-taker check-in: {borrowerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Mentor possession: {ownerPossession ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Test-taker complete: {borrowerComplete ? "✅" : "—"}
+                  </div>
+
+                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 800, fontSize: 13 }}>
+                    Tip: both parties must check in before you can confirm possession.{" "}
+                    {comp && !canConfirmTime ? <>Completion unlocks at <b>{fmtDateTime(new Date(comp.allowedAtMs).toISOString())}</b>.</> : null}
+                  </div>
+
+                  <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <button
                       onClick={() => checkInAsOwner(b)}
-                      disabled={disabled || ownerChecked || !checkinOpen}
-                      title={checkinHelp}
+                      disabled={isBusy || ownerChecked}
+                      title={
+                        ownerChecked
+                          ? "You are checked in ✅"
+                          : checkInOpen
+                          ? "Check-in is open now."
+                          : w
+                          ? now < w.openMs
+                            ? `Check-in opens at ${fmtDateTime(new Date(w.openMs).toISOString())}`
+                            : `Check-in closed at ${fmtDateTime(new Date(w.closeMs).toISOString())}`
+                          : "Missing scheduled time"
+                      }
                       style={{
                         padding: "10px 14px",
                         borderRadius: 14,
-                        border: "1px solid #0f172a",
+                        border: "1px solid #cbd5e1",
                         background: "white",
                         fontWeight: 950,
                         cursor: "pointer",
-                        opacity: disabled || ownerChecked || !checkinOpen ? 0.6 : 1,
+                        opacity: isBusy || ownerChecked ? 0.6 : 1,
                       }}
                     >
-                      {isBusy ? "…" : ownerChecked ? "Checked in" : "Check in"}
+                      {ownerChecked ? "Checked in" : "Checked in"}
                     </button>
 
                     <button
                       onClick={() => confirmBikeReturnedAsOwner(b)}
-                      disabled={!canConfirm}
-                      title={confirmHelp}
+                      disabled={isBusy || !canConfirmPossession}
+                      title={
+                        ownerPossession
+                          ? "Already confirmed ✅"
+                          : !borrowerChecked || !ownerChecked
+                          ? "Both parties must check in first."
+                          : comp && !canConfirmTime
+                          ? `Available at ${fmtDateTime(new Date(comp.allowedAtMs).toISOString())}`
+                          : borrowerComplete
+                          ? "Confirm you have your bike back."
+                          : "You can confirm possession once check-in is done and the minimum time has passed."
+                      }
                       style={{
                         padding: "10px 14px",
                         borderRadius: 14,
@@ -986,16 +803,15 @@ export default function OwnerDashboard() {
                         color: "white",
                         fontWeight: 950,
                         cursor: "pointer",
-                        opacity: canConfirm ? 1 : 0.6,
+                        opacity: isBusy || !canConfirmPossession ? 0.6 : 1,
                       }}
                     >
-                      {isBusy ? "…" : ownerConfirmed ? "Possession confirmed" : "Confirm YOUR bike is returned"}
+                      {ownerPossession ? "Possession confirmed" : "Confirm YOUR bike is returned"}
                     </button>
-
                     <button
-                      onClick={() => cancelBookingAsOwner(b)}
-                      disabled={disabled}
-                      title={cancelTitleFor(b)}
+                      onClick={() => setOpenMsgId((cur) => (cur === b.id ? null : b.id))}
+                      disabled={isBusy}
+                      title="Message the test-taker about timing, meeting spot, etc."
                       style={{
                         padding: "10px 14px",
                         borderRadius: 14,
@@ -1003,12 +819,48 @@ export default function OwnerDashboard() {
                         background: "white",
                         fontWeight: 950,
                         cursor: "pointer",
-                        opacity: disabled ? 0.7 : 1,
+                        opacity: isBusy ? 0.6 : 1,
+                      }}
+                    >
+                       {openMsgId === b.id ? "Hide messages" : "Messages"}
+                     </button>
+
+                    <button
+                      onClick={() => cancelBookingAsOwner(b)}
+                      disabled={isBusy || disableForfeit}
+                      title={disableForfeit ? "FORFEIT is disabled once both parties have checked in." : cancelTitleFor(b)}
+                      style={{
+                        padding: "10px 14px",
+                        borderRadius: 14,
+                        border: "1px solid #cbd5e1",
+                        background: "white",
+                        fontWeight: 950,
+                        cursor: "pointer",
+                        opacity: isBusy || disableForfeit ? 0.6 : 1,
                       }}
                     >
                       {isBusy ? "…" : cancelButtonLabelFor(b)}
                     </button>
                   </div>
+
+                  {openMsgId === b.id && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 14,
+                        padding: 12,
+                        background: "#f8fafc",
+                      }}
+                    >
+                      <BookingMessages
+                        bookingId={b.id}
+                        meId={b.owner_id}
+                        otherUserId={b.borrower_id}
+                        otherLabel="Test-taker"
+/>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1017,15 +869,7 @@ export default function OwnerDashboard() {
       </div>
 
       {/* History */}
-      <div
-        style={{
-          marginTop: 16,
-          border: "1px solid #e2e8f0",
-          borderRadius: 18,
-          padding: 16,
-          background: "white",
-        }}
-      >
+      <div style={{ marginTop: 16, ...cardShell }}>
         <div style={{ fontWeight: 1000, fontSize: 18 }}>History</div>
         <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
           Past/expired/cancelled bookings live here so “Requests” stays clean.
@@ -1046,7 +890,6 @@ export default function OwnerDashboard() {
               <tbody>
                 {history.slice(0, 25).map((b) => {
                   const whenIso = scheduledIsoFor(b);
-                  const when = (whenIso || "") as string;
 
                   const state = (() => {
                     if (b.cancelled) return `Cancelled (${b.cancelled_by || "—"})`;
@@ -1060,7 +903,7 @@ export default function OwnerDashboard() {
                   return (
                     <tr key={b.id} style={{ borderTop: "1px solid #e2e8f0" }}>
                       <td style={{ padding: "10px 0", fontWeight: 900 }}>{shortId(b.id)}</td>
-                      <td style={{ padding: "10px 0", fontWeight: 800, color: "#334155" }}>{fmtDateTime(when)}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 800, color: "#334155" }}>{fmtDateTime(whenIso)}</td>
                       <td style={{ padding: "10px 0", fontWeight: 900 }}>{state}</td>
                     </tr>
                   );
@@ -1070,14 +913,12 @@ export default function OwnerDashboard() {
 
             {history.length > 25 ? (
               <div style={{ marginTop: 10, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
-                Showing latest 25. (We can add pagination later.)
+                Showing latest 25 history rows.
               </div>
             ) : null}
           </div>
         )}
       </div>
-
-      <BoostModal open={boostOpen} onClose={() => setBoostOpen(false)} />
     </div>
   );
 }

@@ -242,7 +242,7 @@ export default function OwnerNew() {
       }
 
       setSaving(false);
-      nav("/dashboard/owner");
+      nav("/dashboard/mentor");
     } catch (e: any) {
       setSaving(false);
       setUploading(false);
@@ -299,13 +299,13 @@ export default function OwnerNew() {
         <div>
           <h1 style={{ margin: 0 }}>Edit bike</h1>
           <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
-            Province is required. Owners can list bikes anywhere in Canada — booking opens province-by-province.
+            Province is required. Mentors can list bikes anywhere in Canada — booking opens province-by-province.
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <Link to="/dashboard/owner" style={btn}>
-            ← Owner dashboard
+          <Link to="/dashboard/mentor" style={btn}>
+            ← Mentor dashboard
           </Link>
           <Link to="/browse" style={btn}>
             Browse
@@ -427,7 +427,7 @@ export default function OwnerNew() {
                 {saving ? "Saving…" : "Save"}
               </button>
 
-              <Link to="/dashboard/owner" style={btn}>
+              <Link to="/dashboard/mentor" style={btn}>
                 Cancel
               </Link>
             </div>

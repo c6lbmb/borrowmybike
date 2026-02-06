@@ -114,7 +114,7 @@ export default function Rules() {
           <Link to="/test-takers" style={topLink}>
             Taking a road test? →
           </Link>
-          <Link to="/owners/start" style={topLink}>
+          <Link to="/mentors/start" style={topLink}>
             List your bike →
           </Link>
         </div>
@@ -160,11 +160,11 @@ export default function Rules() {
         <div style={h2}>3) Clean completion process</div>
         <ul style={ul}>
           <li>Test-taker requests a booking and pays.</li>
-          <li>Owner accepts and provides the owner deposit.</li>
+          <li>Mentor accepts and provides the mentor deposit.</li>
           <li>Both parties check in at the scheduled time window (enforced in-app).</li>
           <li>After the test, both parties confirm completion/possession (enforced in-app).</li>
           <li>
-            Owner earns <b>$100</b> upon successful completion and confirmation, owners deposit can either be returned via same payment method or (recommended) keep on platform to accept future bookings with ease.
+            Mentor earns <b>$100</b> upon successful completion and confirmation their bike was returned. Mentors deposit can either be returned via same payment method or (recommended) be kept on platform as credit to accept future bookings with ease.
           </li>
         </ul>
 
@@ -175,10 +175,10 @@ export default function Rules() {
       </div>
 
       <div style={card} id="cancellations">
-        <div style={h2}>4) Cancellations (after the owner accepts)</div>
+        <div style={h2}>4) Cancellations (after the mentor accepts)</div>
 
         <div style={p}>
-          If a booking is cancelled <b>after the owner has accepted</b>, the
+          If a booking is cancelled <b>after the mentor has accepted</b>, the
           outcome depends on whether the cancellation is early or late.
         </div>
 
@@ -234,7 +234,7 @@ export default function Rules() {
         </ul>
 
         <div style={{ ...p, marginTop: 12 }}>
-          <b>Examples of owner fault</b>
+          <b>Examples of mentor fault</b>
         </div>
         <ul style={ul}>
           <li>

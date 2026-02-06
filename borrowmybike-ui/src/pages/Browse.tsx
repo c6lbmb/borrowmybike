@@ -182,12 +182,12 @@ export default function Browse() {
         <div>
           <h1 style={{ margin: 0 }}>Browse bikes</h1>
           <div style={{ marginTop: 6, color: "#64748b", fontWeight: 750 }}>
-            Owners can list Canada-wide. Booking opens province-by-province.
+            Mentors can list Canada-wide. Booking opens province-by-province.
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link
-            to="/owners/start"
+            to="/mentors/start"
             style={{
               textDecoration: "none",
               fontWeight: 950,

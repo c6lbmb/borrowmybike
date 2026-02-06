@@ -7,7 +7,7 @@ import { useAuth } from "../auth/useAuth";
 import OwnerDashboard from "./OwnerDashboard";
 import BorrowerDashboard from "./BorrowerDashboard";
 
-type Mode = "borrower" | "owner";
+type Mode = "borrower" | "mentor";
 
 function storageKey(userId: string) {
   return `dashboard_mode_${userId}`;
@@ -16,7 +16,7 @@ function storageKey(userId: string) {
 function readSavedMode(userId: string): Mode | null {
   try {
     const v = sessionStorage.getItem(storageKey(userId));
-    return v === "owner" || v === "borrower" ? v : null;
+    return v === "mentor" || v === "borrower" ? v : null;
   } catch {
     return null;
   }
@@ -70,7 +70,7 @@ export default function DashboardRouter() {
 
       // ✅ Default behavior: if you have a bike, assume Owner unless you explicitly choose Borrower.
       // This removes confusion for owners.
-      const initial: Mode = saved ?? (_hasBike ? "owner" : "borrower");
+      const initial: Mode = saved ?? (_hasBike ? "mentor" : "borrower");
 
       setMode(initial);
       setLoading(false);
@@ -126,7 +126,7 @@ export default function DashboardRouter() {
       <div style={{ fontWeight: 950 }}>
         Viewing:{" "}
         <span style={{ color: "#0f172a" }}>
-          {mode === "owner" ? "Owner dashboard" : "Borrower dashboard"}
+          {mode === "mentor" ? "Mentor dashboard" : "Borrower dashboard"}
         </span>
       </div>
 
@@ -151,20 +151,20 @@ export default function DashboardRouter() {
 
         <button
           onClick={() => {
-            saveMode(userId, "owner");
-            setMode("owner");
+            saveMode(userId, "mentor");
+            setMode("mentor");
           }}
           style={{
             padding: "10px 14px",
             borderRadius: 14,
             border: "1px solid #cbd5e1",
-            background: mode === "owner" ? "#0f172a" : "white",
-            color: mode === "owner" ? "white" : "#0f172a",
+            background: mode === "mentor" ? "#0f172a" : "white",
+            color: mode === "mentor" ? "white" : "#0f172a",
             fontWeight: 950,
             cursor: "pointer",
           }}
         >
-          Owner
+          Mentor
         </button>
       </div>
     </div>
@@ -173,7 +173,7 @@ export default function DashboardRouter() {
   return (
     <div style={{ padding: 0 }}>
       <Switcher />
-      {mode === "owner" ? <OwnerDashboard /> : <BorrowerDashboard />}
+      {mode === "mentor" ? <OwnerDashboard /> : <BorrowerDashboard />}
     </div>
   );
 }

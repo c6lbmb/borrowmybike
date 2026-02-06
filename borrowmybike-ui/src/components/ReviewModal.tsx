@@ -148,7 +148,7 @@ export default function ReviewModal({ open, onClose, bookingId, bikeId, ownerId,
           <div>
             <div style={{ fontWeight: 1000, fontSize: 18 }}>Rate your experience</div>
             <div style={{ marginTop: 6, color: "#64748b", fontWeight: 750 }}>
-              Separate scores for the owner and the bike (better data, better trust).
+              Separate scores for the mentor and the bike (better data, better trust).
             </div>
           </div>
           <button style={btn} onClick={onClose}>
@@ -156,7 +156,7 @@ export default function ReviewModal({ open, onClose, bookingId, bikeId, ownerId,
           </button>
         </div>
 
-        <StarRow label="Owner rating" value={ownerRating} onChange={setOwnerRating} />
+        <StarRow label="Mentor rating" value={ownerRating} onChange={setOwnerRating} />
         <StarRow label="Bike rating" value={bikeRating} onChange={setBikeRating} />
 
         <div style={{ marginTop: 14 }}>
@@ -164,7 +164,7 @@ export default function ReviewModal({ open, onClose, bookingId, bikeId, ownerId,
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            placeholder="Quick notes… (e.g., bike condition, owner communication, helpful tips)"
+            placeholder="Quick notes… (e.g., bike condition, mentor communication, helpful tips)"
             style={{
               width: "100%",
               marginTop: 8,
