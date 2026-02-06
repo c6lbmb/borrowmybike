@@ -371,7 +371,7 @@ export default function OwnerDashboard() {
     border: "1px solid #0f172a",
     background: "#0f172a",
     color: "white",
-    fontWeight: 950,
+    fontWeight: 800,
     cursor: "pointer",
     textDecoration: "none",
     display: "inline-flex",
@@ -384,7 +384,7 @@ export default function OwnerDashboard() {
     borderRadius: 14,
     border: "1px solid #cbd5e1",
     background: "white",
-    fontWeight: 950,
+    fontWeight: 800,
     cursor: "pointer",
     textDecoration: "none",
     color: "#0f172a",
@@ -407,8 +407,8 @@ export default function OwnerDashboard() {
             You’ll place the <b>$150 mentor deposit</b> next (credit may apply).
 
             <div style={{ marginTop: 14, padding: 12, border: "1px solid #e2e8f0", borderRadius: 14, background: "#f8fafc" }}>
-              <div style={{ fontWeight: 950, marginBottom: 6 }}>Deposit preference</div>
-              <div style={{ color: "#475569", fontWeight: 800, marginBottom: 10 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Deposit preference</div>
+              <div style={{ color: "#475569", fontWeight: 600, marginBottom: 10 }}>
                 Default is <b>keep on platform</b>. You can change this later, but immediate Stripe refunds are only possible when the original payment is still recent.
               </div>
 
@@ -420,8 +420,8 @@ export default function OwnerDashboard() {
                   onChange={() => setGateDepositChoice("keep")}
                 />
                 <div>
-                  <div style={{ fontWeight: 950 }}>Keep on platform</div>
-                  <div style={{ color: "#475569", fontWeight: 800 }}>Becomes platform credit. You can request a withdrawal later.</div>
+                  <div style={{ fontWeight: 800 }}>Keep on platform</div>
+                  <div style={{ color: "#475569", fontWeight: 600 }}>Becomes platform credit. You can request a withdrawal later.</div>
                 </div>
               </label>
 
@@ -433,8 +433,8 @@ export default function OwnerDashboard() {
                   onChange={() => setGateDepositChoice("refund")}
                 />
                 <div>
-                  <div style={{ fontWeight: 900 }}>Refund to card</div>
-                  <div style={{ color: "#475569", fontWeight: 800 }}>
+                  <div style={{ fontWeight: 800 }}>Refund to card</div>
+                  <div style={{ color: "#475569", fontWeight: 600 }}>
                     We’ll attempt an automatic Stripe refund right after settlement when possible. If it’s requested much later, we’ll notify support for manual e‑transfer.
                   </div>
                 </div>
@@ -471,12 +471,12 @@ export default function OwnerDashboard() {
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 28, fontWeight: 1000 }}>Mentor Dashboard</div>
-          <div style={{ marginTop: 4, color: "#64748b", fontWeight: 800 }}>Your bookings + acceptance window.</div>
+          <div style={{ fontSize: 28, fontWeight: 800 }}>Mentor Dashboard</div>
+          <div style={{ marginTop: 4, color: "#64748b", fontWeight: 600 }}>Your bookings + acceptance window.</div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Link to="/browse" style={{ fontWeight: 900 }}>
+          <Link to="/browse" style={{ fontWeight: 800 }}>
             Browse →
           </Link>
           <button
@@ -484,7 +484,7 @@ export default function OwnerDashboard() {
               padding: "10px 12px",
               borderRadius: 14,
               border: "1px solid #cbd5e1",
-              fontWeight: 900,
+              fontWeight: 800,
               cursor: "pointer",
               background: "white",
             }}
@@ -501,20 +501,20 @@ export default function OwnerDashboard() {
 
       {err && (
         <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #fecaca", background: "#fff1f2" }}>
-          <div style={{ fontWeight: 900, color: "#b00020" }}>Error</div>
-          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 800 }}>{err}</div>
+          <div style={{ fontWeight: 800, color: "#b00020" }}>Error</div>
+          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 600 }}>{err}</div>
         </div>
       )}
 
       {/* My Bike (fast access + thumbnail) */}
       <div style={{ marginTop: 16, ...cardShell }}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>{bikeTitle}</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>{bikeTitle}</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>
           Quick access to your listing. Keep it up to date so test-takers can book confidently.
         </div>
 
         {loadingBike ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>Loading…</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>Loading…</div>
         ) : bike ? (
           <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "120px 1fr", gap: 14, alignItems: "center" }}>
             <div
@@ -539,14 +539,14 @@ export default function OwnerDashboard() {
                 />
               ) : null}
               {!bikeThumb ? (
-                <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 900 }}>
+                <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 800 }}>
                   No photo
                 </div>
               ) : null}
             </div>
 
             <div>
-              <div style={{ color: "#64748b", fontWeight: 800 }}>
+              <div style={{ color: "#64748b", fontWeight: 600 }}>
                 {bike.city || "—"}, {bike.province || "—"} • {bike.is_active ? "Active ✅" : "Inactive ❌"}
               </div>
 
@@ -562,7 +562,7 @@ export default function OwnerDashboard() {
           </div>
         ) : (
           <div style={{ marginTop: 12 }}>
-            <div style={{ color: "#64748b", fontWeight: 800 }}>No bike listed yet.</div>
+            <div style={{ color: "#64748b", fontWeight: 600 }}>No bike listed yet.</div>
             <div style={{ marginTop: 12 }}>
               <Link to="/mentors/new" style={btnPrimary}>
                 Start / Add my bike →
@@ -574,19 +574,19 @@ export default function OwnerDashboard() {
 
       {/* Requests */}
       <div style={{ marginTop: 16, ...cardShell }}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Requests</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>Booking requests waiting for your acceptance (mentor deposit).</div>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Requests</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>Booking requests waiting for your acceptance (mentor deposit).</div>
 
         {pending.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No pending requests.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No pending requests.</div>
         ) : (
           <div style={{ marginTop: 12 }}>
             {pending.map((b) => (
               <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
-                <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
-                <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>scheduled: {fmtDateTime(scheduledIsoFor(b))}</div>
+                <div style={{ fontWeight: 800 }}>Booking {shortId(b.id)}</div>
+                <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>scheduled: {fmtDateTime(scheduledIsoFor(b))}</div>
 
-                <div style={{ marginTop: 10, color: "#475569", fontWeight: 800 }}>
+                <div style={{ marginTop: 10, color: "#475569", fontWeight: 600 }}>
                   “Accept” opens checkout for your $150 deposit (unless credit covers it).
                 </div>
 
@@ -604,11 +604,11 @@ export default function OwnerDashboard() {
 
                   return (
                     <div style={{ marginTop: 10 }}>
-                      <div style={{ fontWeight: 900 }}>
+                      <div style={{ fontWeight: 800 }}>
                         Acceptance window: {deadline ? <Countdown deadlineMs={deadline} /> : "—"}
                       </div>
                       {(acceptanceExpired || tooLate) && (
-                        <div style={{ marginTop: 6, color: "#b91c1c", fontWeight: 900 }}>
+                        <div style={{ marginTop: 6, color: "#b91c1c", fontWeight: 800 }}>
                           This request is expired.
                         </div>
                       )}
@@ -660,7 +660,7 @@ export default function OwnerDashboard() {
                       border: "1px solid #0f172a",
                       background: "#0f172a",
                       color: "white",
-                      fontWeight: 950,
+                      fontWeight: 800,
                       cursor: "pointer",
                       opacity: busyId === b.id ? 0.7 : 1,
                     }}
@@ -676,7 +676,7 @@ export default function OwnerDashboard() {
                       borderRadius: 14,
                       border: "1px solid #cbd5e1",
                       background: "white",
-                      fontWeight: 950,
+                      fontWeight: 800,
                       cursor: "pointer",
                       opacity: busyId === b.id ? 0.7 : 1,
                     }}
@@ -692,14 +692,14 @@ export default function OwnerDashboard() {
 
       {/* Upcoming / Confirmed */}
       <div style={{ marginTop: 16, ...cardShell }}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Upcoming / Confirmed</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>These are accepted bookings (mentor deposit paid).</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Upcoming / Confirmed</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>These are accepted bookings (mentor deposit paid).</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>
           You receive <b>$100</b> once the test is completed and you confirm <b>YOUR</b> bike is returned.
         </div>
 
         {upcoming.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No upcoming bookings.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No upcoming bookings.</div>
         ) : (
           <div style={{ marginTop: 12 }}>
             {upcoming.map((b) => {
@@ -722,8 +722,8 @@ export default function OwnerDashboard() {
 
               return (
                 <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
-                  <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
-                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
+                  <div style={{ fontWeight: 800 }}>Booking {shortId(b.id)}</div>
+                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>
                     scheduled: {fmtDateTime(scheduledIsoFor(b))} • bike: {shortId(b.bike_id)}
              {(() => {
                const scheduledIso = scheduledIsoFor(b);
@@ -736,13 +736,13 @@ export default function OwnerDashboard() {
                return (
                  <div style={{ marginTop: 8 }}>
                    {inPast && (
-                     <div style={{ color: "#b00020", fontWeight: 900 }}>
+                     <div style={{ color: "#b00020", fontWeight: 800 }}>
                        This request is expired (scheduled time already passed).
                      </div>
                    )}
 
                    {deadline && !inPast && (
-                     <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+                     <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600, fontSize: 12 }}>
                        Accept window ({hours}h): <Countdown deadlineMs={deadline} />
                      </div>
                    )}
@@ -752,14 +752,14 @@ export default function OwnerDashboard() {
     
                   </div>
 
-                  <div style={{ marginTop: 10, fontWeight: 900, color: "#0f172a" }}>
+                  <div style={{ marginTop: 10, fontWeight: 800, color: "#0f172a" }}>
                     Mentor check-in: {ownerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Test-taker check-in: {borrowerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Mentor possession: {ownerPossession ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Test-taker complete: {borrowerComplete ? "✅" : "—"}
                   </div>
 
-                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 800, fontSize: 13 }}>
+                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 600, fontSize: 13 }}>
                     Tip: both parties must check in before you can confirm possession.{" "}
                     {comp && !canConfirmTime ? <>Completion unlocks at <b>{fmtDateTime(new Date(comp.allowedAtMs).toISOString())}</b>.</> : null}
                   </div>
@@ -784,7 +784,7 @@ export default function OwnerDashboard() {
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 800,
                         cursor: "pointer",
                         opacity: isBusy || ownerChecked ? 0.6 : 1,
                       }}
@@ -812,7 +812,7 @@ export default function OwnerDashboard() {
                         border: "1px solid #0f172a",
                         background: "#0f172a",
                         color: "white",
-                        fontWeight: 950,
+                        fontWeight: 800,
                         cursor: "pointer",
                         opacity: isBusy || !canConfirmPossession ? 0.6 : 1,
                       }}
@@ -828,7 +828,7 @@ export default function OwnerDashboard() {
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 800,
                         cursor: "pointer",
                         opacity: isBusy ? 0.6 : 1,
                       }}
@@ -845,7 +845,7 @@ export default function OwnerDashboard() {
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 800,
                         cursor: "pointer",
                         opacity: isBusy || disableForfeit ? 0.6 : 1,
                       }}
@@ -881,13 +881,13 @@ export default function OwnerDashboard() {
 
       {/* History */}
       <div style={{ marginTop: 16, ...cardShell }}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>History</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>History</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>
           Past/expired/cancelled bookings live here so “Requests” stays clean.
         </div>
 
         {history.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No history yet.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No history yet.</div>
         ) : (
           <div style={{ marginTop: 12, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
@@ -913,9 +913,9 @@ export default function OwnerDashboard() {
 
                   return (
                     <tr key={b.id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                      <td style={{ padding: "10px 0", fontWeight: 900 }}>{shortId(b.id)}</td>
-                      <td style={{ padding: "10px 0", fontWeight: 800, color: "#334155" }}>{fmtDateTime(whenIso)}</td>
-                      <td style={{ padding: "10px 0", fontWeight: 900 }}>{state}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 800 }}>{shortId(b.id)}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 600, color: "#334155" }}>{fmtDateTime(whenIso)}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 800 }}>{state}</td>
                     </tr>
                   );
                 })}
@@ -923,7 +923,7 @@ export default function OwnerDashboard() {
             </table>
 
             {history.length > 25 ? (
-              <div style={{ marginTop: 10, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+              <div style={{ marginTop: 10, color: "#64748b", fontWeight: 600, fontSize: 12 }}>
                 Showing latest 25 history rows.
               </div>
             ) : null}

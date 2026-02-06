@@ -18,12 +18,12 @@ export default function OwnerStart() {
     flexWrap: "wrap",
     alignItems: "center",
     color: "#334155",
-    fontWeight: 800,
+    fontWeight: 600,
     fontSize: 13,
   };
 
-  const h1: React.CSSProperties = { margin: 0, fontSize: 34, fontWeight: 1000, letterSpacing: -0.3 };
-  const sub: React.CSSProperties = { marginTop: 8, color: "#475569", fontWeight: 800, lineHeight: 1.5 };
+  const h1: React.CSSProperties = { margin: 0, fontSize: 34, fontWeight: 800, letterSpacing: -0.3 };
+  const sub: React.CSSProperties = { marginTop: 8, color: "#475569", fontWeight: 600, lineHeight: 1.5 };
 
   const btn: React.CSSProperties = {
     padding: "12px 14px",
@@ -45,7 +45,7 @@ export default function OwnerStart() {
     color: "white",
   };
 
-  const li: React.CSSProperties = { marginTop: 8, color: "#334155", fontWeight: 800, lineHeight: 1.55 };
+  const li: React.CSSProperties = { marginTop: 8, color: "#334155", fontWeight: 600, lineHeight: 1.55 };
 
   const mobileCss = `
     @media (max-width: 640px) {
@@ -87,7 +87,7 @@ export default function OwnerStart() {
 
       {/* How it works */}
       <div style={card}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>How it works (mentor)</div>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>How it works (mentor)</div>
 
         <div style={{ marginTop: 10 }}>
           <div style={li}>1) List your bike (scooters + small bikes welcome).</div>
@@ -103,15 +103,15 @@ export default function OwnerStart() {
           </div>
         </div>
 
-        <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>
+        <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>
           You control who you help. You can decline any request.
         </div>
       </div>
 
       {/* Why deposit */}
       <div style={card}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Why do mentors put up a $150 deposit?</div>
-        <div style={{ marginTop: 8, color: "#334155", fontWeight: 800, lineHeight: 1.55 }}>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Why do mentors put up a $150 deposit?</div>
+        <div style={{ marginTop: 8, color: "#334155", fontWeight: 600, lineHeight: 1.55 }}>
           It’s for accountability. If an mentor doesn’t show up, or the bike isn’t road-worthy at the registry, that
           deposit can be used to compensate the test-taker so they can rebook their registry test. This reduces the risk
           for serious test-takers and keeps the platform fair.
@@ -120,8 +120,8 @@ export default function OwnerStart() {
 
       {/* What owners do */}
       <div style={card}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>What do I do during the test?</div>
-        <div style={{ marginTop: 8, color: "#334155", fontWeight: 800, lineHeight: 1.55 }}>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>What do I do during the test?</div>
+        <div style={{ marginTop: 8, color: "#334155", fontWeight: 600, lineHeight: 1.55 }}>
           You don’t participate in the test. You meet at the registry, hand over the bike, and wait nearby or leave for a
           bit — coffee, shopping, errands. After the test, you meet again, the bike is returned, and you confirm you have
           it back in the app.
@@ -134,7 +134,7 @@ export default function OwnerStart() {
 
       {/* Safety + documents */}
       <div style={card}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Safety &amp; common sense (recommended)</div>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Safety &amp; common sense (recommended)</div>
         <div style={{ marginTop: 10 }}>
           <div style={li}>• Bring your keys and valid registration + insurance papers.</div>
           <div style={li}>• We recommend taking a photo of the test-taker’s ID before handing over the bike.</div>
@@ -142,7 +142,7 @@ export default function OwnerStart() {
           <div style={li}>• In-app messaging will be enabled so you can coordinate easily.</div>
         </div>
 
-        <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>
+        <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>
           Full terms and cancellation rules are listed in Legal.
         </div>
 
@@ -158,8 +158,8 @@ export default function OwnerStart() {
 
       {/* Insurance quick note */}
       <div style={card}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Insurance (plain English)</div>
-        <div style={{ marginTop: 8, color: "#334155", fontWeight: 800, lineHeight: 1.55 }}>
+        <div style={{ fontWeight: 800, fontSize: 18 }}>Insurance (plain English)</div>
+        <div style={{ marginTop: 8, color: "#334155", fontWeight: 600, lineHeight: 1.55 }}>
           Bikes are provided under <b>permissive use</b> (not renting). Mentors should confirm coverage with their insurer.
           Test-takers may be responsible for loss or damage during the test. BorrowMyBike is a matching platform — not an
           insurer.

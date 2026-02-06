@@ -262,7 +262,7 @@ export default function BorrowerDashboard() {
     border: "1px solid #0f172a",
     background: "#0f172a",
     color: "white",
-    fontWeight: 950,
+    fontWeight: 600,
     cursor: "pointer",
     textDecoration: "none",
     display: "inline-flex",
@@ -275,7 +275,7 @@ export default function BorrowerDashboard() {
     borderRadius: 14,
     border: "1px solid #cbd5e1",
     background: "white",
-    fontWeight: 950,
+    fontWeight: 600,
     cursor: "pointer",
     textDecoration: "none",
     color: "#0f172a",
@@ -287,31 +287,31 @@ export default function BorrowerDashboard() {
   // Always visible “How it works” card (keep this for onboarding)
   const howItWorks = (
     <div style={{ ...cardShell, marginTop: 14 }}>
-      <div style={{ fontWeight: 1000, fontSize: 18 }}>How it works (for Test-Takers)</div>
-      <div style={{ marginTop: 8, color: "#475569", fontWeight: 800, lineHeight: 1.55 }}>
+      <div style={{ fontWeight: 600, fontSize: 18 }}>How it works (for Test-Takers)</div>
+      <div style={{ marginTop: 8, color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
         This platform is built for <b>registry road tests</b> — not recreational rentals. Deposits + rules reduce no-shows
         and last-minute surprises.
       </div>
 
       <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-        <div style={{ color: "#0f172a", fontWeight: 900 }}>1) Browse and choose a bike</div>
-        <div style={{ color: "#475569", fontWeight: 800, lineHeight: 1.55 }}>
+        <div style={{ color: "#0f172a", fontWeight: 600 }}>1) Browse and choose a bike</div>
+        <div style={{ color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
           Pick a bike near your registry appointment. Mentors can accept or decline requests.
         </div>
 
-        <div style={{ color: "#0f172a", fontWeight: 900 }}>2) Confirm and prepare</div>
-        <div style={{ color: "#475569", fontWeight: 800, lineHeight: 1.55 }}>
+        <div style={{ color: "#0f172a", fontWeight: 600 }}>2) Confirm and prepare</div>
+        <div style={{ color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
           Arrive ready: at minimum a <b>helmet</b> and a <b>hands-free device</b> for directions (AB for now; other
           provinces may require a radio provided by the examiner).
         </div>
 
-        <div style={{ color: "#0f172a", fontWeight: 900 }}>3) Meet at the registry</div>
-        <div style={{ color: "#475569", fontWeight: 800, lineHeight: 1.55 }}>
+        <div style={{ color: "#0f172a", fontWeight: 600 }}>3) Meet at the registry</div>
+        <div style={{ color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
           Your mentor meets you at the pre-arranged registry. We recommend they verify your ID before the ride begins.
         </div>
 
-        <div style={{ color: "#0f172a", fontWeight: 900 }}>4) After the test</div>
-        <div style={{ color: "#475569", fontWeight: 800, lineHeight: 1.55 }}>
+        <div style={{ color: "#0f172a", fontWeight: 600 }}>4) After the test</div>
+        <div style={{ color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
           You confirm the test is completed. The mentor confirms they have their bike back (possession).
         </div>
       </div>
@@ -332,8 +332,8 @@ export default function BorrowerDashboard() {
 
   const emptyState = (
     <div style={{ marginTop: 12 }}>
-      <div style={{ color: "#0f172a", fontWeight: 1000, fontSize: 16 }}>No bookings yet.</div>
-      <div style={{ marginTop: 6, color: "#475569", fontWeight: 800, lineHeight: 1.55, maxWidth: 820 }}>
+      <div style={{ color: "#0f172a", fontWeight: 600, fontSize: 16 }}>No bookings yet.</div>
+      <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 820 }}>
         That’s normal — many riders book registry tests weeks out. You can browse bikes now, and when you’re ready,
         request a booking for your appointment time.
       </div>
@@ -350,7 +350,7 @@ export default function BorrowerDashboard() {
         </Link>
       </div>
 
-      <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800, fontSize: 13 }}>
+      <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600, fontSize: 13 }}>
         Tip: When a booking is requested, the mentor has a limited acceptance window. If they don’t accept in time, you
         can quickly choose another bike.
       </div>
@@ -361,12 +361,12 @@ export default function BorrowerDashboard() {
     <div style={page}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 28, fontWeight: 1000 }}>Test-Taker Dashboard</div>
-          <div style={{ marginTop: 4, color: "#64748b", fontWeight: 800 }}>Your bookings + acceptance window.</div>
+          <div style={{ fontSize: 28, fontWeight: 600 }}>Test-Taker Dashboard</div>
+          <div style={{ marginTop: 4, color: "#64748b", fontWeight: 600 }}>Your bookings + acceptance window.</div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Link to="/browse" style={{ fontWeight: 900 }}>
+          <Link to="/browse" style={{ fontWeight: 600 }}>
             Browse →
           </Link>
           <button
@@ -374,7 +374,7 @@ export default function BorrowerDashboard() {
               padding: "10px 12px",
               borderRadius: 14,
               border: "1px solid #cbd5e1",
-              fontWeight: 900,
+              fontWeight: 600,
               cursor: "pointer",
               background: "white",
             }}
@@ -388,8 +388,8 @@ export default function BorrowerDashboard() {
 
       {err && (
         <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #fecaca", background: "#fff1f2" }}>
-          <div style={{ fontWeight: 900, color: "#b00020" }}>Error</div>
-          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 800 }}>{err}</div>
+          <div style={{ fontWeight: 600, color: "#b00020" }}>Error</div>
+          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 600 }}>{err}</div>
         </div>
       )}
 
@@ -397,15 +397,15 @@ export default function BorrowerDashboard() {
 
       {/* Requests (pending mentor acceptance) */}
       <div style={cardShell}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Requests</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
+        <div style={{ fontWeight: 600, fontSize: 18 }}>Requests</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>
           These are requests you’ve paid for that are waiting on mentor acceptance.
         </div>
 
         {loading ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>Loading…</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>Loading…</div>
         ) : pending.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No pending requests.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No pending requests.</div>
         ) : (
           <div style={{ marginTop: 12 }}>
             {pending.map((b) => {
@@ -419,20 +419,20 @@ export default function BorrowerDashboard() {
 
               return (
                 <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
-                  <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
-                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>scheduled: {fmtDateTime(scheduledIso)}</div>
+                  <div style={{ fontWeight: 600 }}>Booking {shortId(b.id)}</div>
+                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>scheduled: {fmtDateTime(scheduledIso)}</div>
 
                   {inPast ? (
-                    <div style={{ marginTop: 8, color: "#b00020", fontWeight: 900 }}>
+                    <div style={{ marginTop: 8, color: "#b00020", fontWeight: 600 }}>
                       This request is expired (scheduled time already passed).
                     </div>
                   ) : deadline ? (
-                    <div style={{ marginTop: 8, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+                    <div style={{ marginTop: 8, color: "#64748b", fontWeight: 600, fontSize: 12 }}>
                       Accept window ({hours}h): <Countdown deadlineMs={deadline} />
                     </div>
                   ) : null}
 
-                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 800 }}>
+                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 600 }}>
                     If the mentor doesn’t accept in time, you can quickly choose another bike.
                   </div>
 
@@ -450,7 +450,7 @@ export default function BorrowerDashboard() {
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy ? 0.7 : 1,
                       }}
@@ -467,11 +467,11 @@ export default function BorrowerDashboard() {
 
       {/* Upcoming / Confirmed */}
       <div style={cardShell}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Upcoming / Confirmed</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>These are accepted bookings (both paid).</div>
+        <div style={{ fontWeight: 600, fontSize: 18 }}>Upcoming / Confirmed</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>These are accepted bookings (both paid).</div>
 
         {upcoming.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>{sorted.length ? "No upcoming bookings." : emptyState}</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>{sorted.length ? "No upcoming bookings." : emptyState}</div>
         ) : (
           <div style={{ marginTop: 12 }}>
             {upcoming.map((b) => {
@@ -503,19 +503,19 @@ export default function BorrowerDashboard() {
 
               return (
                 <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
-                  <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
-                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
+                  <div style={{ fontWeight: 600 }}>Booking {shortId(b.id)}</div>
+                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>
                     scheduled: {fmtDateTime(scheduledIsoFor(b))} • bike: {shortId(b.bike_id)}
                   </div>
 
-                  <div style={{ marginTop: 10, fontWeight: 900, color: "#0f172a" }}>
+                  <div style={{ marginTop: 10, fontWeight: 600, color: "#0f172a" }}>
                     Your check-in: {borrowerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Mentor check-in: {ownerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Your completion: {borrowerConfirmed ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Mentor possession: {ownerPossession ? "✅" : "—"}
                   </div>
 
-                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 800, fontSize: 13 }}>
+                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 600, fontSize: 13 }}>
                     Tip: both parties must check in before you can confirm completion.{' '}
                     {comp && !canConfirmTime ? (
                       <>Completion unlocks at <b>{fmtDateTime(new Date(comp.allowedAtMs).toISOString())}</b>.</>
@@ -542,7 +542,7 @@ export default function BorrowerDashboard() {
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy || borrowerChecked || !checkInOpen ? 0.6 : 1,
                       }}
@@ -568,7 +568,7 @@ export default function BorrowerDashboard() {
                         border: "1px solid #0f172a",
                         background: "#0f172a",
                         color: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy || !canComplete ? 0.6 : 1,
                       }}
@@ -585,7 +585,7 @@ export default function BorrowerDashboard() {
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy ? 0.6 : 1,
                       }}
@@ -602,7 +602,7 @@ export default function BorrowerDashboard() {
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy || disableForfeit ? 0.6 : 1,
                       }}
@@ -618,7 +618,7 @@ export default function BorrowerDashboard() {
                           border: "1px solid #0f172a",
                           background: "#0f172a",
                           color: "white",
-                          fontWeight: 950,
+                          fontWeight: 600,
                           cursor: "pointer",
                         }}
                         onClick={() => openReview(b)}
@@ -650,13 +650,13 @@ export default function BorrowerDashboard() {
 
       {/* History */}
       <div style={cardShell}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>History</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
+        <div style={{ fontWeight: 600, fontSize: 18 }}>History</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>
           Past/expired/cancelled bookings live here so "Requests" stays clean.
         </div>
 
         {history.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No history yet.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No history yet.</div>
         ) : (
           <div style={{ marginTop: 12, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
@@ -683,9 +683,9 @@ export default function BorrowerDashboard() {
 
                   return (
                     <tr key={b.id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                      <td style={{ padding: "10px 0", fontWeight: 900 }}>{shortId(b.id)}</td>
-                      <td style={{ padding: "10px 0", fontWeight: 800 }}>{fmtDateTime(whenIso)}</td>
-                      <td style={{ padding: "10px 0", fontWeight: 900 }}>{state}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 600 }}>{shortId(b.id)}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 600 }}>{fmtDateTime(whenIso)}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 600 }}>{state}</td>
                     </tr>
                   );
                 })}

@@ -111,13 +111,14 @@ export default function Layout() {
     gap: 18,
     flexWrap: "wrap",
     alignItems: "center",
-    fontWeight: 400,
+    fontWeight: 900,
   };
 
   const navLink = (href: string): React.CSSProperties => ({
     textDecoration: "none",
-    color: isActive(loc.pathname, href) ? "#0f172a" : "#475569",
-    borderBottom: isActive(loc.pathname, href) ? "2px solid #0f172a" : "2px solid transparent",
+    color: isActive(loc.pathname, href) ? "#16a34a" : "#0f172a",
+    fontWeight: isActive(loc.pathname, href) ? 700 : 500,
+    borderBottom: isActive(loc.pathname, href) ? "2px solid #16a34a" : "2px solid transparent",
     paddingBottom: 4,
     whiteSpace: "nowrap",
   });
@@ -142,7 +143,7 @@ export default function Layout() {
   const authLink: React.CSSProperties = {
     textDecoration: "none",
     color: "#0f172a",
-    fontWeight: 600,
+    fontWeight: 900,
     border: "1px solid #cbd5e1",
     background: "white",
     padding: "8px 12px",
@@ -154,7 +155,7 @@ export default function Layout() {
     border: "1px solid #cbd5e1",
     background: "white",
     color: "#0f172a",
-    fontWeight: 600,
+    fontWeight: 900,
     padding: "8px 12px",
     borderRadius: 12,
     cursor: "pointer",
@@ -201,11 +202,11 @@ export default function Layout() {
     gap: 16,
   };
 
-  const footerTitle: React.CSSProperties = { fontWeight: 700 };
+  const footerTitle: React.CSSProperties = { fontWeight: 1000 };
   const footerLink: React.CSSProperties = {
     color: "#0f172a",
     textDecoration: "none",
-    fontWeight: 400,
+    fontWeight: 900,
   };
 
   const creditsLabel = useMemo(() => formatMoney(creditsTotal), [creditsTotal]);

@@ -264,7 +264,7 @@ export default function OwnerNew() {
     padding: "10px 12px",
     borderRadius: 14,
     border: "1px solid #cbd5e1",
-    fontWeight: 900,
+    fontWeight: 600,
     cursor: "pointer",
     background: "white",
     color: "#0f172a",
@@ -283,7 +283,7 @@ export default function OwnerNew() {
     return (
       <div style={page}>
         <h1 style={{ margin: 0 }}>Edit bike</h1>
-        <div style={{ marginTop: 8, color: "#64748b", fontWeight: 800 }}>Please sign in first.</div>
+        <div style={{ marginTop: 8, color: "#64748b", fontWeight: 450 }}>Please sign in first.</div>
         <div style={{ marginTop: 12 }}>
           <Link to="/auth" style={btnPrimary}>
             Sign in
@@ -298,7 +298,7 @@ export default function OwnerNew() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ margin: 0 }}>Edit bike</h1>
-          <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
+          <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>
             Province is required. Mentors can list bikes anywhere in Canada — booking opens province-by-province.
           </div>
         </div>
@@ -315,50 +315,50 @@ export default function OwnerNew() {
 
       {err && (
         <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #fecaca", background: "#fff1f2" }}>
-          <div style={{ fontWeight: 900, color: "#b00020" }}>Error</div>
-          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 800 }}>{err}</div>
+          <div style={{ fontWeight: 450, color: "#b00020" }}>Error</div>
+          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 450 }}>{err}</div>
         </div>
       )}
 
       <div style={card}>
-        <div style={{ fontWeight: 1000, fontSize: 16 }}>
+        <div style={{ fontWeight: 850, fontSize: 16 }}>
           {bike ? `${bike.year || ""} ${bike.make || ""} ${bike.model || ""}`.trim() || "Your bike" : "Your bike"}
         </div>
-        <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>This is what borrowers will see. Keep it accurate.</div>
+        <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>This is what borrowers will see. Keep it accurate.</div>
 
         {loading ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>Loading…</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 450 }}>Loading…</div>
         ) : (
           <>
             <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
-                <div style={{ fontWeight: 900, marginBottom: 6 }}>Make</div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>Make</div>
                 <input value={make} onChange={(e) => setMake(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
               </div>
 
               <div>
-                <div style={{ fontWeight: 900, marginBottom: 6 }}>Model</div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>Model</div>
                 <input value={model} onChange={(e) => setModel(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
               </div>
 
               <div>
-                <div style={{ fontWeight: 900, marginBottom: 6 }}>Year</div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>Year</div>
                 <input value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
               </div>
 
               <div>
-                <div style={{ fontWeight: 900, marginBottom: 6 }}>City</div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>City</div>
                 <input value={city} onChange={(e) => setCity(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
               </div>
 
               <div style={{ gridColumn: "1 / -1" }}>
-                <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>
                   Province <span style={{ color: "#b00020" }}>*</span>
                 </div>
                 <select
                   value={province}
                   onChange={(e) => setProvince(e.target.value)}
-                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0", background: "white", fontWeight: 800 }}
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0", background: "white", fontWeight: 450 }}
                 >
                   <option value="" disabled>
                     Select province…
@@ -371,7 +371,7 @@ export default function OwnerNew() {
                   ))}
                 </select>
 
-                <div style={{ marginTop: 8, color: "#64748b", fontWeight: 800, fontSize: 13 }}>
+                <div style={{ marginTop: 8, color: "#64748b", fontWeight: 450, fontSize: 13 }}>
                   You can list in any province. If your province is marked “coming soon”, borrowers will see the listing but booking will be disabled until launch.
                 </div>
               </div>
@@ -379,7 +379,7 @@ export default function OwnerNew() {
 
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} id="active" />
-              <label htmlFor="active" style={{ fontWeight: 900 }}>
+              <label htmlFor="active" style={{ fontWeight: 450 }}>
                 Active listing (show in Browse)
               </label>
             </div>
@@ -387,8 +387,8 @@ export default function OwnerNew() {
             <hr style={{ marginTop: 14, border: "none", borderTop: "1px solid #e2e8f0" }} />
 
             <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 1000 }}>Cover photo</div>
-              <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
+              <div style={{ fontWeight: 850 }}>Cover photo</div>
+              <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>
                 One photo for MVP. We compress to WebP before upload to keep storage cheap.
               </div>
 
@@ -409,7 +409,7 @@ export default function OwnerNew() {
                 ) : bike && cover ? (
                   <img src={cover} alt="Cover" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                 ) : (
-                  <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 900 }}>
+                  <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 450 }}>
                     No photo yet
                   </div>
                 )}
@@ -419,7 +419,7 @@ export default function OwnerNew() {
                 <input type="file" accept="image/*" onChange={(e) => onPickFile(e.target.files?.[0] || null)} />
               </div>
 
-              {uploading && <div style={{ marginTop: 8, color: "#64748b", fontWeight: 800 }}>Uploading photo…</div>}
+              {uploading && <div style={{ marginTop: 8, color: "#64748b", fontWeight: 450 }}>Uploading photo…</div>}
             </div>
 
             <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -437,3 +437,4 @@ export default function OwnerNew() {
     </div>
   );
 }
+ 

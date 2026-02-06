@@ -141,3 +141,65 @@ thead th { position: sticky; top: 0; }
   color: #475569;
   line-height: 1.6;
 }
+
+
+/* Typography defaults */
+:root{ --bmb-text:#0f172a; --bmb-muted:#334155; --bmb-green:#15803d; }
+body{ font-weight:400; color:var(--bmb-text); }
+p, li, span{ font-weight:400; }
+strong, b{ font-weight:700; }
+/* ================================
+   Global typography normalization
+   ================================ */
+
+/* Default body text = non-bold */
+p,
+li,
+span,
+label,
+div {
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* Headings stay bold */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 700;
+}
+
+/* Muted helper text */
+.text-muted {
+  font-weight: 400;
+  color: #64748b;
+}
+
+/* Lists look calmer */
+ul,
+ol {
+  padding-left: 1.25rem;
+}
+/* ================================
+   Navigation styling
+   ================================ */
+
+.main-nav a {
+  font-weight: 600;
+  color: #0f172a; /* near-black */
+  text-decoration: none;
+}
+
+.main-nav a:hover {
+  color: #16a34a; /* brand green */
+}
+
+.main-nav a.active {
+  color: #16a34a;
+  font-weight: 700;
+  border-bottom: 2px solid #16a34a;
+  padding-bottom: 2px;
+}
