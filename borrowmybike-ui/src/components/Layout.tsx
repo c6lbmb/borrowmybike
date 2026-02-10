@@ -37,6 +37,7 @@ export default function Layout() {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: number | null = null;
 
     async function loadCredits() {
       if (!me) {
@@ -63,10 +64,13 @@ export default function Layout() {
       }
     }
 
+    // initial load + light polling so newly-issued credits show up without refresh
     loadCredits();
+    timer = window.setInterval(loadCredits, 30000);
 
     return () => {
       cancelled = true;
+      if (timer != null) window.clearInterval(timer);
     };
   }, [me]);
 

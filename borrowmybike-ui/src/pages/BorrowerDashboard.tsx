@@ -15,6 +15,9 @@ type BookingRow = {
   borrower_id: string;
   owner_id: string;
 
+  // Booking status from DB (e.g., "pending", "confirmed"). Optional because some selects omit it.
+  status?: string | null;
+
   booking_date: string | null;
   scheduled_start_at: string | null;
 
@@ -37,6 +40,17 @@ type BookingRow = {
   owner_confirmed_complete?: boolean | null;
 
   cancelled_by?: string | null;
+
+  // Force majeure agreement timestamps (backend fields)
+  force_majeure_borrower_agreed_at?: string | null;
+  force_majeure_owner_agreed_at?: string | null;
+  settlement_outcome?: string | null;
+  treat_as_borrower_no_show?: boolean;
+  treat_as_owner_no_show?: boolean;
+
+  // Check-in timestamps (backend fields)
+  borrower_checked_in_at?: string | null;
+  owner_checked_in_at?: string | null;
 };
 
 function fmtDateTime(iso?: string | null) {
@@ -50,8 +64,37 @@ function shortId(id?: string | null) {
   return id ? id.slice(0, 8) + "…" : "-";
 }
 
+function bookingStateLabel(b: BookingRow): string {
+  if (b.cancelled) return "Cancelled";
+  if (b.needs_review) return "Needs review";
+  if (b.settled) {
+    const outcome = (b.settlement_outcome || "").toLowerCase();
+    if (outcome === "force_majeure") return "Force majeure";
+    if (outcome === "borrower_no_show") return "No-show (test-taker)";
+    if (outcome === "owner_no_show") return "No-show (mentor)";
+    if (outcome === "happy_path") return "Completed";
+    if (outcome === "borrower_fault") return "Resolved (test-taker issue)";
+    if (outcome === "owner_fault") return "Resolved (mentor issue)";
+    if (b.treat_as_borrower_no_show) return "No-show (test-taker)";
+    if (b.treat_as_owner_no_show) return "No-show (mentor)";
+    return "Settled";
+  }
+  if (b.status === "pending_acceptance") return "Pending acceptance";
+  if (b.status === "confirmed") return "Confirmed";
+  return b.status || "—";
+}
+
+
 function scheduledIsoFor(b: BookingRow) {
   return b.scheduled_start_at ?? b.booking_date ?? null;
+}
+
+function hasBorrowerCheckedIn(b: BookingRow) {
+  return !!b.borrower_checked_in_at || !!b.borrower_checked_in;
+}
+
+function hasOwnerCheckedIn(b: BookingRow) {
+  return !!b.owner_checked_in_at || !!b.owner_checked_in;
 }
 
 function isPendingAcceptance(b: BookingRow) {
@@ -138,6 +181,8 @@ function completionAllowedAtFor(b: BookingRow) {
   return { allowedAtMs };
 }
 
+
+
 export default function BorrowerDashboard() {
   const { user } = useAuth();
   const me = user?.id;
@@ -155,6 +200,76 @@ export default function BorrowerDashboard() {
   // Messages (only for confirmed bookings)
   const [openMsgId, setOpenMsgId] = useState<string | null>(null);
 
+  // Prevent repeated system-expire attempts per booking (acceptance window timeout)
+  const [systemExpireInFlight, setSystemExpireInFlight] = useState<Record<string, boolean>>({});
+  const [fmInFlight, setFmInFlight] = useState<Record<string, boolean>>({});
+  const [noShowInFlight, setNoShowInFlight] = useState<Record<string, boolean>>({});
+  const [examinerRefusalInFlight, setExaminerRefusalInFlight] = useState<Record<string, boolean>>({});
+
+  async function requestForceMajeureAsBorrower(b: BookingRow) {
+    if (!me) return;
+    if (fmInFlight[b.id]) return;
+
+    const ok = window.confirm(
+      `Force Majeure (weather/registry reschedule)\n\n` +
+        `Only use this if the registry has rescheduled the test due to weather or unavoidable conditions, BEFORE anyone checks in.\n\n` +
+        `This will record your agreement and wait for the mentor to agree.`
+    );
+    if (!ok) return;
+
+    const shouldFinalize = !!(b as any).force_majeure_owner_agreed_at;
+
+
+    setFmInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: true }));
+    try {
+      // Write FM agreement via Edge Function to avoid RLS "permission denied" on bookings.
+      const { data: fmData, error: fmErr } = await sb.functions.invoke("agree-force-majeure", {
+        body: { booking_id: b.id, role: "borrower" },
+      });
+      if (fmErr) throw fmErr;
+      if ((fmData as any)?.error) throw new Error((fmData as any).error);
+// If the mentor already agreed, finalize immediately by settling as force majeure.
+      if (shouldFinalize) {
+        const { error: sErr, data } = await sb.functions.invoke("settle-booking", {
+          body: { booking_id: b.id },
+        });
+        if (sErr) throw sErr;
+        if ((data as any)?.error) throw new Error((data as any).error);
+      }
+
+      await load();
+    } catch (e: any) {
+      alert(e?.message || "Failed to request force majeure");
+    } finally {
+      setFmInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: false }));
+    }
+  }
+
+  async function requestExaminerRefusalAsBorrower(b: BookingRow) {
+    if (!me) return;
+    if (examinerRefusalInFlight[b.id]) return;
+
+    const ok = window.confirm(
+      "Examiner refused the road test?\n\nOnly use this if BOTH parties have checked in and the registry/examiner refuses the test at the start (e.g., safety/technical issue). This will settle the booking and issue rebook credits."
+    );
+    if (!ok) return;
+
+    setExaminerRefusalInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: true }));
+    try {
+      const { error } = await sb.functions.invoke("examiner-refusal", {
+        body: { booking_id: b.id, claimed_by: "borrower" },
+      });
+      if (error) throw error;
+      await load();
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "Examiner refusal failed");
+    } finally {
+      setExaminerRefusalInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: false }));
+    }
+  }
+
+
   async function load() {
     if (!me) return;
     setLoading(true);
@@ -164,7 +279,7 @@ export default function BorrowerDashboard() {
       const res = await sb
         .from("bookings")
         .select(
-          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by"
+          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show"
         )
         .eq("borrower_id", me)
         .order("created_at", { ascending: false });
@@ -180,9 +295,47 @@ export default function BorrowerDashboard() {
   }
 
   useEffect(() => {
+    if (!me) return;
     load();
+    const t = window.setInterval(() => {
+      load();
+    }, 15000);
+    return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
+
+  // Auto-expire bookings that missed the mentor acceptance window.
+  // Backend truth: cancel-booking with cancelled_by="system_expired" will issue borrower credit when applicable.
+  useEffect(() => {
+    if (!me) return;
+    if (!rows.length) return;
+
+    const pending = rows.filter((b) => isPendingAcceptance(b) && !b.cancelled && !b.settled);
+    for (const b of pending) {
+      const scheduledIso = scheduledIsoFor(b);
+      const deadline = acceptanceDeadlineMs({ createdAtIso: b.created_at ?? null, scheduledIso });
+      if (deadline == null) continue;
+      if (Date.now() <= deadline) continue;
+      if (systemExpireInFlight[b.id]) continue;
+
+      setSystemExpireInFlight((prev) => ({ ...prev, [b.id]: true }));
+
+      void (async () => {
+        try {
+          await callFn("cancel-booking", { booking_id: b.id, cancelled_by: "system_expired" });
+          await load();
+        } catch {
+          // Allow retry later (but avoid tight loops)
+          setSystemExpireInFlight((prev) => {
+            const next = { ...prev };
+            delete next[b.id];
+            return next;
+          });
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, rows, systemExpireInFlight]);
 
   function openReview(b: BookingRow) {
     setReviewCtx({ bookingId: b.id, bikeId: b.bike_id, ownerId: b.owner_id });
@@ -190,11 +343,11 @@ export default function BorrowerDashboard() {
   }
 
   async function cancelBookingAsBorrower(b: BookingRow) {
-    // Once both checked in, FORFEIT should be disabled (same rule as mentor dash)
-    const borrowerChecked = !!b.borrower_checked_in;
-    const ownerChecked = !!b.owner_checked_in;
-    if (borrowerChecked && ownerChecked) {
-      alert("FORFEIT is disabled once both parties have checked in.");
+    // Cancel/forfeit is no longer available once either party has checked in.
+    const borrowerChecked = hasBorrowerCheckedIn(b);
+    const ownerChecked = hasOwnerCheckedIn(b);
+    if (borrowerChecked || ownerChecked) {
+      alert("Cancel/forfeit is disabled once either party has checked in.");
       return;
     }
 
@@ -240,6 +393,27 @@ export default function BorrowerDashboard() {
       setBusyId(null);
     }
   }
+
+  async function claimNoShowAsTestTaker(b: BookingRow) {
+    if (!me) return;
+    if (noShowInFlight[b.id]) return;
+
+    const ok = window.confirm(
+      "Claim no-show?\n\nUse this only if you checked in and the mentor did not show up. This will trigger settlement."
+    );
+    if (!ok) return;
+
+    setNoShowInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: true }));
+    try {
+      await callFn("settle-booking", { booking_id: b.id, claim_no_show: true, claimant_role: "borrower" });
+      await load();
+    } catch (e: any) {
+      alert(e?.message || "No-show claim failed");
+    } finally {
+      setNoShowInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: false }));
+    }
+  }
+
 
   const sorted = useMemo(() => rows, [rows]);
   const pending = sorted.filter((b) => isPendingAcceptance(b));
@@ -436,11 +610,102 @@ export default function BorrowerDashboard() {
                     If the mentor doesn’t accept in time, you can quickly choose another bike.
                   </div>
 
+
+                  {/* Force Majeure (discreet) — 24h before start, only before anyone checks in */}
+                  {(() => {
+                    const iso = scheduledIsoFor(b);
+                    const startMs = typeof iso === "string" ? new Date(iso).getTime() : NaN;
+                    const nowMs = Date.now();
+                    const within24h =
+                      Number.isFinite(startMs) && nowMs >= startMs - 24 * 60 * 60 * 1000 && nowMs <= startMs;
+                    const fmBorrower = (b as any).force_majeure_borrower_agreed_at as string | null | undefined;
+                    const fmOwner = (b as any).force_majeure_owner_agreed_at as string | null | undefined;
+
+                    const bothPaidConfirmed =
+                      !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
+
+
+                    const borrowerChecked = hasBorrowerCheckedIn(b);
+                    const ownerChecked = hasOwnerCheckedIn(b);
+
+                    const scheduledMs = typeof iso === "string" ? new Date(iso).getTime() : NaN;
+                    const withinExaminerRefusalWindow =
+                      Number.isFinite(scheduledMs) && isWithin(Date.now(), scheduledMs, scheduledMs + 10 * 60 * 1000);
+
+                    const showFm =
+                      bothPaidConfirmed && within24h && !borrowerChecked && !ownerChecked && !b.settled && !b.completed;
+
+                    const showExaminerRefusal =
+                      bothPaidConfirmed &&
+                      borrowerChecked &&
+                      ownerChecked &&
+                      withinExaminerRefusalWindow &&
+                      !b.settled &&
+                      !b.completed &&
+                      !b.cancelled;
+
+                    if (!showFm && !(fmBorrower || fmOwner) && !showExaminerRefusal) return null;
+
+                    return (
+                      <div style={{ marginTop: 10 }}>
+                        {showFm ? (
+                          <button
+                            onClick={() => requestForceMajeureAsBorrower(b)}
+                            disabled={isBusy || !!fmInFlight[b.id] || !!fmBorrower}
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: 12,
+                              border: "1px solid #cbd5e1",
+                              background: "white",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              opacity: isBusy || !!fmInFlight[b.id] || !!fmBorrower ? 0.6 : 1,
+                            }}
+                            title="Weather/registry reschedule (no penalties). Requires both parties to agree."
+                          >
+                            {fmBorrower ? "FM requested" : fmInFlight[b.id] ? "…" : "Weather / FM"}
+                          </button>
+                        ) : null}
+
+                        {showExaminerRefusal ? (
+                          <button
+                            onClick={() => requestExaminerRefusalAsBorrower(b)}
+                            disabled={examinerRefusalInFlight[b.id]}
+                            title="Examiner refused the road test (e.g., weather/unsafe conditions/registry reschedule) before anyone checks in."
+                            style={{
+                              padding: "10px 14px",
+                              borderRadius: 14,
+                              border: "1px solid #cbd5e1",
+                              background: "white",
+                              fontWeight: 800,
+                              cursor: "pointer",
+                              opacity: examinerRefusalInFlight[b.id] ? 0.6 : 1,
+                            }}
+                          >
+                            {examinerRefusalInFlight[b.id] ? "Submitting…" : "Examiner refused"}
+                          </button>
+                        ) : null}
+
+                        {(fmBorrower || fmOwner) ? (
+                          <div style={{ marginTop: 6, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
+                            {fmBorrower && fmOwner
+                              ? "Force majeure confirmed by both parties."
+                              : fmBorrower
+                              ? "FM requested — waiting for mentor to confirm."
+                              : "Mentor requested FM — you can confirm in this booking."}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+
                   <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <Link to="/browse" style={btnPrimary}>
                       Browse bikes →
                     </Link>
 
+
+                    {!(hasBorrowerCheckedIn(b) || hasOwnerCheckedIn(b)) ? (
                     <button
                       onClick={() => cancelBookingAsBorrower(b)}
                       disabled={isBusy}
@@ -457,6 +722,7 @@ export default function BorrowerDashboard() {
                     >
                       {isBusy ? "…" : cancelButtonLabelFor(b)}
                     </button>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -476,9 +742,11 @@ export default function BorrowerDashboard() {
           <div style={{ marginTop: 12 }}>
             {upcoming.map((b) => {
               const isBusy = busyId === b.id;
+                  const messagesAllowed = !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
 
-              const ownerChecked = !!b.owner_checked_in;
-              const borrowerChecked = !!b.borrower_checked_in;
+
+              const ownerChecked = hasOwnerCheckedIn(b);
+              const borrowerChecked = hasBorrowerCheckedIn(b);
               const borrowerConfirmed = !!b.borrower_confirmed_complete;
               const ownerPossession = !!b.owner_confirmed_complete;
 
@@ -497,7 +765,7 @@ export default function BorrowerDashboard() {
                 !b.cancelled &&
                 !b.completed;
 
-              const disableForfeit = borrowerChecked && ownerChecked;
+              const hideCancel = borrowerChecked || ownerChecked;
 
               const canReview = b.completed && b.settled && !b.cancelled && !b.needs_review;
 
@@ -522,7 +790,88 @@ export default function BorrowerDashboard() {
                     ) : null}
                   </div>
 
+
+                  {/* Force Majeure (discreet) — 24h before start, only before anyone checks in */}
+                  {(() => {
+                    const iso = scheduledIsoFor(b);
+                    const startMs = typeof iso === "string" ? new Date(iso).getTime() : NaN;
+                    const nowMs = Date.now();
+                    const within24h =
+                      Number.isFinite(startMs) && nowMs >= startMs - 24 * 60 * 60 * 1000 && nowMs <= startMs;
+                    const fmBorrower = (b as any).force_majeure_borrower_agreed_at as string | null | undefined;
+                    const fmOwner = (b as any).force_majeure_owner_agreed_at as string | null | undefined;
+
+                    const bothPaidConfirmed =
+                      !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
+
+	                    const showFm = bothPaidConfirmed && within24h && !borrowerChecked && !ownerChecked && !b.settled && !b.completed;
+
+	                    // Examiner refusal: same visibility rules as FM (pre-check-in, within 24h)
+	                    const showExaminerRefusal =
+	                      bothPaidConfirmed &&
+	                      within24h &&
+	                      !borrowerChecked &&
+	                      !ownerChecked &&
+	                      !b.settled &&
+	                      !b.completed;
+
+                    if (!showFm && !(fmBorrower || fmOwner) && !showExaminerRefusal) return null;
+
+                    return (
+                      <div style={{ marginTop: 10 }}>
+                        {showFm ? (
+                          <button
+                            onClick={() => requestForceMajeureAsBorrower(b)}
+                            disabled={isBusy || !!fmInFlight[b.id] || !!fmBorrower}
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: 12,
+                              border: "1px solid #cbd5e1",
+                              background: "white",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              opacity: isBusy || !!fmInFlight[b.id] || !!fmBorrower ? 0.6 : 1,
+                            }}
+                            title="Weather/registry reschedule (no penalties). Requires both parties to agree."
+                          >
+                            {fmBorrower ? "FM requested" : fmInFlight[b.id] ? "…" : "Weather / FM"}
+                          </button>
+                        ) : null}
+
+                        {showExaminerRefusal ? (
+                          <button
+                            onClick={() => requestExaminerRefusalAsBorrower(b)}
+                            disabled={examinerRefusalInFlight[b.id]}
+                            title="Examiner refused the road test (e.g., weather/unsafe conditions/registry reschedule) before anyone checks in."
+                            style={{
+                              padding: "10px 14px",
+                              borderRadius: 14,
+                              border: "1px solid #cbd5e1",
+                              background: "white",
+                              fontWeight: 800,
+                              cursor: "pointer",
+                              opacity: examinerRefusalInFlight[b.id] ? 0.6 : 1,
+                            }}
+                          >
+                            {examinerRefusalInFlight[b.id] ? "Submitting…" : "Examiner refused"}
+                          </button>
+                        ) : null}
+
+                        {(fmBorrower || fmOwner) ? (
+                          <div style={{ marginTop: 6, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
+                            {fmBorrower && fmOwner
+                              ? "Force majeure confirmed by both parties."
+                              : fmBorrower
+                              ? "FM requested — waiting for mentor to confirm."
+                              : "Mentor requested FM — you can confirm in this booking."}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+
                   <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {(borrowerChecked || checkInOpen) && (
                     <button
                       onClick={() => checkInAsTestTaker(b)}
                       disabled={isBusy || borrowerChecked || !checkInOpen}
@@ -530,18 +879,14 @@ export default function BorrowerDashboard() {
                         borrowerChecked
                           ? "You are checked in ✅"
                           : checkInOpen
-                          ? "Check-in is open now."
-                          : w
-                          ? now < w.openMs
-                            ? `Check-in opens at ${fmtDateTime(new Date(w.openMs).toISOString())}`
-                            : `Check-in closed at ${fmtDateTime(new Date(w.closeMs).toISOString())}`
-                          : "Missing scheduled time"
+                          ? "Check in when you arrive at the registry (opens 15 min before start)."
+                          : "Check-in opens 15 minutes before start."
                       }
                       style={{
                         padding: "10px 14px",
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
-                        background: "white",
+                        background: borrowerChecked ? "#f8fafc" : "white",
                         fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy || borrowerChecked || !checkInOpen ? 0.6 : 1,
@@ -549,7 +894,9 @@ export default function BorrowerDashboard() {
                     >
                       {borrowerChecked ? "Checked in" : "Check in"}
                     </button>
+                  )}
 
+                    {(borrowerConfirmed || canComplete) && (
                     <button
                       onClick={() => confirmTestCompleted(b)}
                       disabled={isBusy || !canComplete}
@@ -575,11 +922,14 @@ export default function BorrowerDashboard() {
                     >
                       {borrowerConfirmed ? "Completion confirmed" : "Confirm test completed"}
                     </button>
+                    )}
 
+
+                    {messagesAllowed ? (
                     <button
                       onClick={() => setOpenMsgId((cur) => (cur === b.id ? null : b.id))}
                       disabled={isBusy}
-                      title="Message the mentor about timing, meeting spot, etc."
+                      title="Message the mentor about timing, meeting spot, safety questions, etc."
                       style={{
                         padding: "10px 14px",
                         borderRadius: 14,
@@ -592,23 +942,80 @@ export default function BorrowerDashboard() {
                     >
                       {openMsgId === b.id ? "Hide messages" : "Messages"}
                     </button>
+                  ) : (
+                    <div style={{ color: "#64748b", fontWeight: 700, fontSize: 12 }}>
+                      Messages unlock once the booking is confirmed (both paid).
+                    </div>
+                  )}
 
-                    <button
-                      onClick={() => cancelBookingAsBorrower(b)}
-                      disabled={isBusy || disableForfeit}
-                      title={disableForfeit ? "FORFEIT is disabled once both parties have checked in." : cancelTitleFor(b)}
-                      style={{
-                        padding: "10px 14px",
-                        borderRadius: 14,
-                        border: "1px solid #cbd5e1",
-                        background: "white",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        opacity: isBusy || disableForfeit ? 0.6 : 1,
-                      }}
-                    >
-                      {isBusy ? "…" : cancelButtonLabelFor(b)}
-                    </button>
+                  {(() => {
+                    const iso = scheduledIsoFor(b);
+                    const startMs = typeof iso === "string" ? new Date(iso).getTime() : NaN;
+                    const nowMs = Date.now();
+
+                    const bothPaidConfirmed =
+                      !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
+
+                    // Shows 5 min after start; becomes clickable at 30 min (backend truth).
+                    const showAtMs = Number.isFinite(startMs) ? startMs + 5 * 60 * 1000 : NaN;
+                    const enableAtMs = Number.isFinite(startMs) ? startMs + 30 * 60 * 1000 : NaN;
+
+                    const eligible =
+                      bothPaidConfirmed &&
+                      borrowerChecked &&
+                      !ownerChecked &&
+                      !b.settled &&
+                      !b.completed &&
+                      Number.isFinite(showAtMs) &&
+                      nowMs >= showAtMs;
+
+                    if (!eligible) return null;
+
+                    const enabled = Number.isFinite(enableAtMs) && nowMs >= enableAtMs;
+
+                    return (
+                      <button
+                        onClick={() => claimNoShowAsTestTaker(b)}
+                        disabled={isBusy || !enabled || !!noShowInFlight[b.id]}
+                        title={
+                          enabled
+                            ? "Claim no-show (mentor did not check in)."
+                            : "Available 30 minutes after the scheduled start time."
+                        }
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: 14,
+                          border: "1px solid #cbd5e1",
+                          background: "white",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          opacity: isBusy || !enabled || !!noShowInFlight[b.id] ? 0.6 : 1,
+                        }}
+                      >
+                        {noShowInFlight[b.id] ? "…" : "Claim no-show"}
+                      </button>
+                    );
+                  })()}
+
+
+                    {!hideCancel ? (
+                      <button
+                        onClick={() => cancelBookingAsBorrower(b)}
+                        disabled={isBusy}
+                        title={cancelTitleFor(b)}
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: 14,
+                          border: "1px solid #cbd5e1",
+                          background: "white",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          opacity: isBusy ? 0.6 : 1,
+                        }}
+                      >
+                        {isBusy ? "…" : cancelButtonLabelFor(b)}
+                      </button>
+                    ) : null}
 
                     {canReview ? (
                       <button
@@ -671,15 +1078,7 @@ export default function BorrowerDashboard() {
                 {history.slice(0, 25).map((b) => {
                   const whenIso = scheduledIsoFor(b);
 
-                  const state = (() => {
-                    if (b.needs_review) return "Needs review";
-                    if (b.cancelled) return `Cancelled (${b.cancelled_by || "—"})`;
-                    if (b.settled) return "Settled";
-                    if (b.completed && !b.settled) return "Completed (await settle)";
-                    if (isPastScheduled(b) && b.borrower_paid && !b.owner_deposit_paid) return "Expired request";
-                    if (isPastScheduled(b)) return "Past";
-                    return "—";
-                  })();
+                  const state = bookingStateLabel(b);
 
                   return (
                     <tr key={b.id} style={{ borderTop: "1px solid #e2e8f0" }}>
