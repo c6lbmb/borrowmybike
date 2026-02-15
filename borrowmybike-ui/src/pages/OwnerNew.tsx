@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { sb } from "../lib/supabase";
 import { useAuth } from "../auth/useAuth";
 import { PROVINCES, type ProvinceCode } from "../lib/provinces";
+import { callFn } from "../lib/fn";
 
 type Bike = {
   id: string;
@@ -83,6 +84,13 @@ export default function OwnerNew() {
   const [province, setProvince] = useState<string>(""); // force selection
   const [active, setActive] = useState(true);
 
+  // Mentor profile (stored on users table)
+  const [firstName, setFirstName] = useState("");
+  const [yearsRiding, setYearsRiding] = useState<string>("");
+  const [travelQuadrants, setTravelQuadrants] = useState<string[]>(["NE", "NW", "SE", "SW"]);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
+
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -98,6 +106,24 @@ export default function OwnerNew() {
     (async () => {
       setLoading(true);
       setErr(null);
+
+      // Load mentor profile (safe minimal fields) via Edge Function
+      try {
+        const prof = await callFn<{ owners: Array<{ id: string; first_name?: string | null; years_riding?: number | null; travel_quadrants?: string[] | null }> }>(
+          "get-owner-summaries",
+          { owner_ids: [me] },
+        );
+        if (prof.ok && prof.data?.owners?.[0]) {
+          const o = prof.data.owners[0];
+          setFirstName((o.first_name ?? "") as string);
+          setYearsRiding(o.years_riding != null ? String(o.years_riding) : "");
+          if (Array.isArray(o.travel_quadrants) && o.travel_quadrants.length) {
+            setTravelQuadrants(o.travel_quadrants as string[]);
+          }
+        }
+      } catch {
+        // ignore profile load errors (bike onboarding is primary)
+      }
 
       const res = await sb
         .from("bikes")
@@ -131,6 +157,43 @@ export default function OwnerNew() {
       setLoading(false);
     })();
   }, [me]);
+
+  async function saveMentorProfile() {
+    if (!me) return;
+    setProfileMsg(null);
+
+    const fn = firstName.trim();
+    if (!fn) {
+      setProfileMsg("Please enter your first name.");
+      return;
+    }
+
+    const yrs = yearsRiding.trim() ? Number(yearsRiding.trim()) : null;
+    if (yearsRiding.trim() && (!Number.isFinite(yrs) || yrs! < 0 || yrs! > 60)) {
+      setProfileMsg("Years riding must be a number between 0 and 60.");
+      return;
+    }
+
+    if (!travelQuadrants.length) {
+      setProfileMsg("Pick at least one quadrant you’re willing to travel to.");
+      return;
+    }
+
+    setSavingProfile(true);
+    try {
+      const res = await callFn("update-my-profile", {
+        first_name: fn.slice(0, 50),
+        years_riding: yrs,
+        travel_quadrants: travelQuadrants,
+      });
+      if (!res.ok) throw new Error(res.error || "Profile update failed");
+      setProfileMsg("Saved ✅");
+    } catch (e: any) {
+      setProfileMsg(e?.message || "Profile update failed");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   function onPickFile(f: File | null) {
     setFile(f);
@@ -299,7 +362,7 @@ export default function OwnerNew() {
         <div>
           <h1 style={{ margin: 0 }}>Edit bike</h1>
           <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>
-            Province is required. Mentors can list bikes anywhere in Canada — booking opens province-by-province.
+            Province is required. You can list anywhere in Canada — booking opens province-by-province.
           </div>
         </div>
 
@@ -321,10 +384,97 @@ export default function OwnerNew() {
       )}
 
       <div style={card}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Mentor profile</div>
+          <div style={{ color: "#64748b", fontWeight: 650, fontSize: 13 }}>Shown to test‑takers</div>
+        </div>
+
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 800, color: "#0f172a" }}>Why we ask this</summary>
+          <div style={{ marginTop: 8, color: "#64748b", fontWeight: 650 }}>
+            A short public profile builds trust and helps you accept the right requests (without sharing private details).
+          </div>
+        </details>
+
+        <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>First name</div>
+            <input
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder="e.g., Rahim"
+              style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }}
+            />
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Years riding</div>
+            <input
+              value={yearsRiding}
+              onChange={(e) => setYearsRiding(e.target.value)}
+              inputMode="numeric"
+              placeholder="e.g., 8"
+              style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }}
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Where you’ll travel (quadrants)</div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {(["NE", "NW", "SE", "SW"] as const).map((q) => {
+                const checked = travelQuadrants.includes(q);
+                return (
+                  <label key={q} style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 850, color: "#0f172a" }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setTravelQuadrants((prev) => {
+                          const set = new Set(prev);
+                          if (on) set.add(q);
+                          else set.delete(q);
+                          return Array.from(set);
+                        });
+                      }}
+                    />
+                    {q}
+                  </label>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 8, color: "#64748b", fontWeight: 650, fontSize: 13 }}>
+              Tip: pick the areas you’re genuinely comfortable meeting in.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={saveMentorProfile}
+            disabled={savingProfile}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 14,
+              border: "1px solid #0f172a",
+              fontWeight: 900,
+              cursor: savingProfile ? "not-allowed" : "pointer",
+              background: "#0f172a",
+              color: "white",
+            }}
+          >
+            {savingProfile ? "Saving…" : "Save profile"}
+          </button>
+          {profileMsg ? <div style={{ fontWeight: 850, color: profileMsg.includes("✅") ? "#166534" : "#b00020" }}>{profileMsg}</div> : null}
+        </div>
+      </div>
+
+      <div style={card}>
         <div style={{ fontWeight: 850, fontSize: 16 }}>
           {bike ? `${bike.year || ""} ${bike.make || ""} ${bike.model || ""}`.trim() || "Your bike" : "Your bike"}
         </div>
-        <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>This is what borrowers will see. Keep it accurate.</div>
+        <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>This is what borrowers see.</div>
 
         {loading ? (
           <div style={{ marginTop: 12, color: "#64748b", fontWeight: 450 }}>Loading…</div>
@@ -371,9 +521,12 @@ export default function OwnerNew() {
                   ))}
                 </select>
 
-                <div style={{ marginTop: 8, color: "#64748b", fontWeight: 450, fontSize: 13 }}>
-                  You can list in any province. If your province is marked “coming soon”, borrowers will see the listing but booking will be disabled until launch.
-                </div>
+                <details style={{ marginTop: 10 }}>
+                  <summary style={{ cursor: "pointer", color: "#64748b", fontWeight: 650, fontSize: 13 }}>How province availability works</summary>
+                  <div style={{ marginTop: 8, color: "#64748b", fontWeight: 450, fontSize: 13 }}>
+                    You can list in any province. If it’s marked “coming soon”, borrowers can see your listing but can’t book until launch.
+                  </div>
+                </details>
               </div>
             </div>
 

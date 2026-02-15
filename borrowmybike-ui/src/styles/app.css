@@ -82,3 +82,40 @@ body {
 @media (min-width: 1024px) {
   .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* =====================================
+   Global mobile overflow guard
+   ===================================== */
+html, body, #root {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* =====================================
+   Responsive header nav (BorrowMyBike)
+   - Desktop: inline nav
+   - Mobile: dropdown menu
+   ===================================== */
+
+/* default: desktop-first */
+.bmb-mobile-menu-btn { display: none; }
+.bmb-mobile-menu-panel { display: none; }
+
+@media (max-width: 768px) {
+  .bmb-nav { display: none !important; }
+  .bmb-mobile-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .bmb-mobile-menu-panel { display: block; }
+}
+
+
+/* Footer responsiveness: prevent columns clipping on small screens */
+@media (max-width: 768px) {
+  .bmb-footer-inner {
+    grid-template-columns: 1fr !important;
+    gap: 24px !important;
+  }
+}

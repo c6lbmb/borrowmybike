@@ -1,5 +1,4 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
-import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -133,18 +132,36 @@ async function logBookingAudit(args: {
   if (error) throw error;
 }
 
+
 async function stripeRefundPartial(
   stripeKey: string,
   paymentIntentId: string,
   amountCents: number,
   idempotencyKey: string,
 ) {
-  const stripe = new Stripe(stripeKey, { apiVersion: "2023-10-16" });
-  const refund = await stripe.refunds.create(
-    { payment_intent: paymentIntentId, amount: amountCents },
-    { idempotencyKey },
-  );
-  return refund;
+  // Stripe SDKs can pull in Node polyfills that are unstable in Supabase Edge runtime.
+  // Use Stripe REST API directly (form-encoded) to avoid Node compatibility shims.
+  const body = new URLSearchParams({
+    payment_intent: paymentIntentId,
+    amount: String(amountCents),
+  });
+
+  const res = await fetch("https://api.stripe.com/v1/refunds", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${stripeKey}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Idempotency-Key": idempotencyKey,
+    },
+    body,
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    const msg = (data && (data.error?.message || data.error || data.message)) || `Stripe refund failed (${res.status})`;
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+  }
+  return data;
 }
 
 serve(async (req) => {
@@ -396,6 +413,19 @@ return json(200, {
         refundResult.performed = true;
         refundResult.via = "stripe";
         refundResult.stripe_refund_id = refund.id;
+
+        // Persist refund info onto the payment row for audit/debug (does not change business logic).
+        const payType = canceller === "borrower" ? "borrower_booking" : "owner_deposit";
+        await supabase
+          .from("payments")
+          .update({
+            refund_id: refund.id,
+            refund_status: refund.status ?? "succeeded",
+            refunded_amount_cents: cents(cancellerRefund),
+          })
+          .eq("booking_id", booking_id)
+          .eq("payment_type", payType);
+
       } catch (e: any) {
         // fallback to credit if Stripe refund fails
         await ensureCredit({
@@ -429,7 +459,29 @@ return json(200, {
     }
   }
 
-  // 4) record platform income payment row
+  
+  // 3b) Persist canceller refund summary onto bookings (UI visibility)
+  // This does NOT affect payouts/credits; it only mirrors what happened for transparency.
+  if (early && cancellerRefund > 0 && refundResult.performed) {
+    const refundStatus =
+      refundResult.via === "stripe"
+        ? "refunded_partial"
+        : refundResult.via === "credit"
+        ? "credited_partial"
+        : refundResult.via === "credit_fallback"
+        ? "credited_partial"
+        : "partial";
+
+    await supabase
+      .from("bookings")
+      .update({
+        refund_status: refundStatus,
+        refund_amount_cents: cents(cancellerRefund),
+      })
+      .eq("id", booking_id);
+  }
+
+// 4) record platform income payment row
   const { error: platErr } = await supabase.from("payments").insert([{
     booking_id,
     payment_type: "platform_income_cancel_fee",
@@ -449,7 +501,7 @@ return json(200, {
     actor_role: canceller,
     actor_user_id: canceller_user_id,
     action: early ? "cancel_gt_5_days" : "cancel_lte_5_days",
-    note: `cancellerRefund=${cancellerRefund}; platformIncome=${platformIncome}; refundResult=${refundResult ? "stripe_refund" : "credit_or_none"}`,
+    note: `cancellerRefund=${cancellerRefund}; platformIncome=${platformIncome}; refundResult=${refundResult?.via ?? "none"}`,
   });
 
 return json(200, {

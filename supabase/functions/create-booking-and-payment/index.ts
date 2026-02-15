@@ -99,6 +99,11 @@ serve(async (req) => {
   }
 
   const { borrower_id, owner_id, bike_id, booking_date, scheduled_start_at, duration_minutes, registry_id } = body ?? {};
+  const {
+    test_taker_intro,
+    time_window,
+    registry_quadrant,
+  } = body ?? {};
 
   if (!borrower_id || !bike_id || !booking_date) {
     return json(400, { error: "borrower_id, bike_id, booking_date are required" });
@@ -133,6 +138,29 @@ serve(async (req) => {
   }
 
   const bookingId = booking.id as string;
+
+  // 1b) Optional: persist mentor-decision context (safe if columns don't exist yet)
+  try {
+    const intro = typeof test_taker_intro === "string" ? test_taker_intro.trim().slice(0, 240) : null;
+    const twOk = ["morning", "early_afternoon", "late_afternoon"].includes(String(time_window));
+    const quadOk = ["NE", "NW", "SE", "SW"].includes(String(registry_quadrant));
+
+    const patch: any = {};
+    if (intro) patch.test_taker_intro = intro;
+    if (twOk) patch.time_window = String(time_window);
+    if (quadOk) patch.registry_quadrant = String(registry_quadrant);
+
+    if (Object.keys(patch).length) {
+      const { error: upErr } = await supabase.from("bookings").update(patch).eq("id", bookingId);
+      // Ignore "column does not exist" until migration is applied.
+      if (upErr && !(String((upErr as any).message || "").toLowerCase().includes("column") && String((upErr as any).message || "").toLowerCase().includes("does not exist"))) {
+        // Non-fatal: do not block payments.
+        console.warn("Could not persist booking context:", (upErr as any).message);
+      }
+    }
+  } catch {
+    // ignore
+  }
 
   // 2) Consume borrower credit (partial supported, leftover reissued)
   let creditApplied = 0;

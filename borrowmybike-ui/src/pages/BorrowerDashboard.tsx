@@ -51,6 +51,11 @@ type BookingRow = {
   // Check-in timestamps (backend fields)
   borrower_checked_in_at?: string | null;
   owner_checked_in_at?: string | null;
+
+  // New: context shown to mentor (kept here for completeness)
+  test_taker_intro?: string | null;
+  time_window?: "morning" | "early_afternoon" | "late_afternoon" | null;
+  registry_quadrant?: "NE" | "NW" | "SE" | "SW" | null;
 };
 
 function fmtDateTime(iso?: string | null) {
@@ -279,7 +284,7 @@ export default function BorrowerDashboard() {
       const res = await sb
         .from("bookings")
         .select(
-          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show"
+          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,test_taker_intro,time_window,registry_quadrant"
         )
         .eq("borrower_id", me)
         .order("created_at", { ascending: false });

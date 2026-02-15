@@ -125,6 +125,10 @@ export default function RequestBooking() {
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
   });
 
+  const [timeWindow, setTimeWindow] = useState<"" | "morning" | "early_afternoon" | "late_afternoon">("");
+  const [registryQuadrant, setRegistryQuadrant] = useState<"" | "NE" | "NW" | "SE" | "SW">("");
+  const [testTakerIntro, setTestTakerIntro] = useState<string>("");
+
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
@@ -255,6 +259,10 @@ export default function RequestBooking() {
     if (!bike?.owner_id) return setErr("This bike is missing an owner_id in the database.");
     if (provinceBlocked) return setErr(`Bookings are not available in ${blockedProvinceName} yet.`);
 
+
+    if (!registryQuadrant) return setErr("Please select the registry area (NE / NW / SE / SW).");
+    if (!testTakerIntro.trim()) return setErr("Please write a short intro (shown to the mentor).");
+
     const whenIso = isoWithTzFromLocalDatetime(whenLocal);
     if (!whenIso) return setErr("Invalid date/time.");
 
@@ -266,6 +274,9 @@ export default function RequestBooking() {
       scheduled_start_at: whenIso,
       duration_minutes: 30,
       registry_id: null as string | null,
+      time_window: timeWindow || null,
+      registry_quadrant: registryQuadrant || null,
+      test_taker_intro: (testTakerIntro || "").trim() || null,
     };
 
     setSubmitting(true);
@@ -324,7 +335,7 @@ export default function RequestBooking() {
         <div>
           <h1 style={{ margin: 0 }}>{title}</h1>
           <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>
-            This is a request, not a confirmed booking — mentor must accept.
+            Request only — mentor must accept.
           </div>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -446,7 +457,88 @@ export default function RequestBooking() {
                 }}
               />
               <div style={{ color: "#64748b", fontWeight: 600 }}>
-                Tip: pick a time that matches your registry test time.
+                Match your registry time.
+              </div>
+
+              <div style={{ marginTop: 12, display: "grid", gap: 12, maxWidth: 560 }}>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 900 }}>Time window <span style={{ color: "#64748b", fontWeight: 700 }}>(optional)</span></div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {[
+                      { v: "morning", label: "Morning" },
+                      { v: "early_afternoon", label: "Early afternoon" },
+                      { v: "late_afternoon", label: "Late afternoon" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => setTimeWindow(opt.v as any)}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 999,
+                          border: "1px solid " + (timeWindow === opt.v ? "#0f172a" : "#cbd5e1"),
+                          background: timeWindow === opt.v ? "#0f172a" : "white",
+                          color: timeWindow === opt.v ? "white" : "#0f172a",
+                          fontWeight: 850,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ color: "#64748b", fontWeight: 600 }}>
+                    Optional: helps mentors plan.
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 900 }}>Registry area (quadrant)</div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {["NE", "NW", "SE", "SW"].map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        onClick={() => setRegistryQuadrant(q as any)}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 999,
+                          border: "1px solid " + (registryQuadrant === q ? "#0f172a" : "#cbd5e1"),
+                          background: registryQuadrant === q ? "#0f172a" : "white",
+                          color: registryQuadrant === q ? "white" : "#0f172a",
+                          fontWeight: 850,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ color: "#64748b", fontWeight: 600 }}>
+                    Vague area only. Exact location shared after acceptance.
+                  </div>
+                </div>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 900 }}>Short intro (shown to mentor)</div>
+                  <textarea
+                    value={testTakerIntro}
+                    onChange={(e) => setTestTakerIntro(e.target.value)}
+                    placeholder="Example: Hi! I’ve practiced a lot in parking lots and quiet roads. Comfortable with turns and stops. I’m calm and respectful — just need a road-test ready bike for my exam."
+                    rows={4}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      border: "1px solid #cbd5e1",
+                      fontWeight: 700,
+                      resize: "vertical",
+                    }}
+                  />
+                  <div style={{ color: "#64748b", fontWeight: 600 }}>
+                    Keep it short. This helps mentors accept the right requests.
+                  </div>
+                </label>
               </div>
             </label>
 

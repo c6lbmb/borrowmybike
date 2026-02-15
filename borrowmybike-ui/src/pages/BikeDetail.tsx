@@ -28,6 +28,14 @@ type Review = {
   created_at: string | null;
 };
 
+
+type OwnerSummary = {
+  id: string;
+  first_name: string | null;
+  years_riding: number | null;
+  travel_quadrants: string[] | null;
+};
+
 const BUCKET = "bike-photos";
 
 function coverUrl(ownerId: string, bikeId: string) {
@@ -47,6 +55,7 @@ export default function BikeDetail() {
   const { id } = useParams();
   const [bike, setBike] = useState<Bike | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [owner, setOwner] = useState<OwnerSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -82,6 +91,24 @@ export default function BikeDetail() {
 
       if (!cancelled) {
         setBike((b.data as Bike) || null);
+
+        // Load mentor summary for this bike
+        try {
+          const ownerId = ((b.data as Bike) || null)?.owner_id;
+          if (ownerId) {
+            const fnRes = await sb.functions.invoke("get-owner-summaries", {
+              body: { owner_ids: [ownerId] },
+            });
+            const owners = (fnRes.data?.owners || fnRes.data || []) as OwnerSummary[];
+            const found = (owners || []).find((x) => x?.id === ownerId) || null;
+            setOwner(found);
+          } else {
+            setOwner(null);
+          }
+        } catch (e) {
+          console.error(e);
+          setOwner(null);
+        }
         setReviews(((r.data as Review[]) || []) ?? []);
         setLoading(false);
       }
@@ -130,6 +157,16 @@ export default function BikeDetail() {
     <div style={{ display: "grid", gap: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <h1 style={{ margin: 0 }}>{titleOf(bike)}</h1>
+        {owner ? (
+          <div style={{ marginTop: 6, color: "#334155", fontWeight: 850 }}>
+            Mentor: {(owner.first_name || "—").trim()}{owner.years_riding != null ? ` • ${owner.years_riding} yrs riding` : ""}
+            {Array.isArray(owner.travel_quadrants) && owner.travel_quadrants.length ? (
+              <div style={{ marginTop: 2, color: "#64748b", fontWeight: 800 }}>
+                Will travel: {owner.travel_quadrants.join(", ")}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link to="/browse" style={{ fontWeight: 800, textDecoration: "none" }}>
             ← Back to Browse

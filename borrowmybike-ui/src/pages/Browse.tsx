@@ -21,6 +21,14 @@ type ReviewAgg = {
   bike_rating: number | null;
 };
 
+
+type OwnerSummary = {
+  id: string;
+  first_name: string | null;
+  years_riding: number | null;
+  travel_quadrants: string[] | null;
+};
+
 const BUCKET = "bike-photos";
 type ProvinceFilter = "All" | ProvinceCode;
 
@@ -54,6 +62,7 @@ function stars(avg: number) {
 export default function Browse() {
   const [bikes, setBikes] = useState<BikeRow[]>([]);
   const [reviews, setReviews] = useState<ReviewAgg[]>([]);
+  const [ownerSummaries, setOwnerSummaries] = useState<Record<string, OwnerSummary>>({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -86,6 +95,33 @@ export default function Browse() {
       } else {
         // ✅ Show bikes in ALL provinces (owner-first Canada-wide)
         setBikes(((bRes.data as BikeRow[]) || []) ?? []);
+
+        // Load mentor summaries (first name / years riding / travel quadrants) for cards
+        try {
+          const ownerIds = Array.from(
+            new Set(
+              (((bRes.data as BikeRow[]) || []) ?? [])
+                .map((x) => x.owner_id)
+                .filter(Boolean),
+            ),
+          );
+          if (ownerIds.length) {
+            const fnRes = await sb.functions.invoke("get-owner-summaries", {
+              body: { owner_ids: ownerIds },
+            });
+            const owners = (fnRes.data?.owners || fnRes.data || []) as OwnerSummary[];
+            const map: Record<string, OwnerSummary> = {};
+            for (const o of owners || []) {
+              if (o?.id) map[o.id] = o;
+            }
+            setOwnerSummaries(map);
+          } else {
+            setOwnerSummaries({});
+          }
+        } catch (e) {
+          console.error(e);
+          setOwnerSummaries({});
+        }
       }
 
       if (rRes.error) {
@@ -446,6 +482,23 @@ export default function Browse() {
                   <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
                     {shortMeta(b)}
                   </div>
+
+                  {(() => {
+                    const o = ownerSummaries[b.owner_id];
+                    if (!o) return null;
+                    const name = (o.first_name || "").trim();
+                    const yrs = o.years_riding != null ? `${o.years_riding} yrs` : "";
+                    const travel = Array.isArray(o.travel_quadrants) && o.travel_quadrants.length
+                      ? `Will travel: ${o.travel_quadrants.join(", ")}`
+                      : "";
+                    if (!name && !yrs && !travel) return null;
+                    return (
+                      <div style={{ marginTop: 6, color: "#334155", fontWeight: 800, fontSize: 13 }}>
+                        {name ? `Mentor: ${name}` : "Mentor"}{yrs ? ` • ${yrs}` : ""}
+                        {travel ? <div style={{ marginTop: 2, color: "#64748b", fontWeight: 800 }}>{travel}</div> : null}
+                      </div>
+                    );
+                  })()}
 
                   <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div style={{ color: "#475569", fontWeight: 800, fontSize: 13 }}>

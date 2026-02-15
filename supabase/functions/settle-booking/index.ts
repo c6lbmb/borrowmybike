@@ -18,6 +18,7 @@ const OWNER_DEPOSIT_AMOUNT = 150;
 const BOOKING_FEE_AMOUNT = 150;
 const COMP_AMOUNT = 100;
 const PLATFORM_INCOME_OWNER_FAULT = 50;
+const PLATFORM_INCOME_COMPLETION = BOOKING_FEE_AMOUNT - COMP_AMOUNT;
 const SETTLEMENT_VERSION = "v8b";
 
 function json(status: number, body: unknown) {
@@ -123,6 +124,42 @@ async function ensurePlatformIncomePaid(args: {
   return { created: true };
 }
 
+
+async function ensurePlatformIncomeCompletionPaid(args: {
+  booking_id: string;
+  amount: number;
+  borrower_id: string;
+  owner_id: string;
+}) {
+  const { booking_id, amount, borrower_id, owner_id } = args;
+
+  const { data: existing, error: exErr } = await supabase
+    .from("payments")
+    .select("id,status")
+    .eq("booking_id", booking_id)
+    .eq("payment_type", "platform_income_completion")
+    .eq("status", "paid")
+    .limit(1);
+
+  if (exErr) throw exErr;
+  if (existing && existing.length) return { created: false };
+
+  const { error: insErr } = await supabase.from("payments").insert([{
+    booking_id,
+    payment_type: "platform_income_completion",
+    status: "paid",
+    amount,
+    currency: "CAD",
+    borrower_id,
+    owner_id,
+    method: "internal",
+    meta: { source: "settle-booking", kind: "platform_income_completion", settlement_version: SETTLEMENT_VERSION },
+  }]);
+
+  if (insErr) throw insErr;
+  return { created: true };
+}
+
 async function ensureCreditAvailable(args: {
   user_id: string;
   credit_type: string;
@@ -132,18 +169,35 @@ async function ensureCreditAvailable(args: {
 }) {
   const { user_id, credit_type, amount, booking_id, reason } = args;
 
-  // If a credit already exists for this booking+type, reuse it (idempotent behavior)
-  const { data: existing, error: e1 } = await supabase
+  // 1) If a credit already exists for this booking+type, reuse it (idempotent behavior)
+  const { data: existingByBooking, error: e1 } = await supabase
     .from("credits")
-    .select("id")
+    .select("id,status")
     .eq("booking_id", booking_id)
     .eq("credit_type", credit_type)
     .limit(1);
 
   if (e1) throw new Error(`credits lookup failed: ${e1.message}`);
 
-  if (existing && existing.length > 0) {
-    return { created: false, id: existing[0].id };
+  if (existingByBooking && existingByBooking.length > 0) {
+    return { created: false, id: existingByBooking[0].id };
+  }
+
+  // 2) Some credits are globally unique while 'available' (e.g. uniq_credits_available_once on user_id+credit_type+reason).
+  // If an available credit already exists for this user/type/reason, reuse it to avoid unique constraint violations.
+  const { data: existingAvailable, error: e1b } = await supabase
+    .from("credits")
+    .select("id,status")
+    .eq("user_id", user_id)
+    .eq("credit_type", credit_type)
+    .eq("reason", reason)
+    .eq("status", "available")
+    .limit(1);
+
+  if (e1b) throw new Error(`credits lookup failed: ${e1b.message}`);
+
+  if (existingAvailable && existingAvailable.length > 0) {
+    return { created: false, id: existingAvailable[0].id };
   }
 
   const { data: inserted, error: e2 } = await supabase
@@ -451,8 +505,8 @@ serve(async (req: Request) => {
     const msSinceStart = now.getTime() - startAt.getTime();
     const minutesSinceStart = msSinceStart / 60000;
 
-    // Must be >= 30 minutes after scheduled start
-    if (minutesSinceStart < 30) {
+    // Must be >= 10 minutes after scheduled start
+    if (minutesSinceStart < 10) {
       return json(400, { error: "No-show claim not available yet", minutesSinceStart });
     }
 
@@ -529,6 +583,7 @@ serve(async (req: Request) => {
         platformIncome,
         compensation_to_owner_payout_due: compPayout,
         owner_deposit_return: ownerDepositReturn,
+        platform_income: platformIncome,
       });
     } else {
       // Owner no-show: owner deposit is forfeited -> split 50 platform + 100 borrower compensation.
@@ -587,7 +642,7 @@ await supabase.from("bookings").update({
 
 
   try {
-    // Happy path: pay owner $100, return/hold deposit, keep platform income implicit
+    // Happy path: pay owner $100, return/hold deposit, record platform income completion
     if (isHappyPath) {
       const payout = await ensurePaymentDue({
         booking_id,
@@ -602,6 +657,16 @@ await supabase.from("bookings").update({
         owner_id: booking.owner_id,
         depositChoice: booking.owner_deposit_choice,
       });
+
+
+      // Record platform income on completion (idempotent)
+      const platformIncome = await ensurePlatformIncomeCompletionPaid({
+        booking_id,
+        amount: PLATFORM_INCOME_COMPLETION,
+        borrower_id: booking.borrower_id,
+        owner_id: booking.owner_id,
+      });
+
 
       const { error: upErr } = await supabase
         .from("bookings")
@@ -621,6 +686,7 @@ await supabase.from("bookings").update({
         scenario: "happy_path",
         payout,
         owner_deposit_return: ownerDepositReturn,
+        platform_income: platformIncome,
       });
     }
 
@@ -679,6 +745,7 @@ await supabase.from("bookings").update({
         booking_id,
         scenario: "owner_fault",
         owner_deposit_return: ownerDepositReturn,
+        platform_income: platformIncome,
       });
     }
 
@@ -802,6 +869,7 @@ if (isBorrowerFault) {
         scenario: "force_majeure",
         borrower_fee_return: { performed: true, via: "credit", credit_id: borrowerCredit?.id ?? borrowerCredit?.credit_id ?? borrowerCredit?.id },
         owner_deposit_return: ownerDepositReturn,
+        platform_income: platformIncome,
       });
     }
 // Fallback: unsupported scenario

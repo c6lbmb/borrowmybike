@@ -16,6 +16,11 @@ type BookingRow = {
   booking_date: string | null;
   scheduled_start_at: string | null;
 
+  // Test-taker context (shown to mentor)
+  test_taker_intro?: string | null;
+  time_window?: string | null;
+  registry_quadrant?: string | null;
+
   cancelled: boolean;
   settled: boolean;
   completed: boolean;
@@ -315,7 +320,7 @@ export default function OwnerDashboard() {
       const res = await sb
         .from("bookings")
         .select(
-          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at",
+          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,test_taker_intro,time_window,registry_quadrant",
         )
         .eq("owner_id", me)
         .order("created_at", { ascending: false });
@@ -851,7 +856,7 @@ return (
       {/* Requests */}
       <div style={{ marginTop: 16, ...cardShell }}>
         <div style={{ fontWeight: 1000, fontSize: 18 }}>Requests</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>Booking requests waiting for your acceptance (mentor deposit).</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>Requests waiting for your decision.</div>
 
         {pending.length === 0 ? (
           <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No pending requests.</div>
@@ -862,35 +867,70 @@ return (
                 <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
                 <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>scheduled: {fmtDateTime(scheduledIsoFor(b))}</div>
 
-                <div style={{ marginTop: 10, color: "#475569", fontWeight: 800 }}>
-                  “Accept” opens checkout for your $150 deposit (unless credit covers it).
-                </div>
+                {(() => {
+                  const intro = (b.test_taker_intro || "").trim();
+                  const tw = (b.time_window || "").trim();
+                  const rq = (b.registry_quadrant || "").trim();
+                  if (!intro && !tw && !rq) return null;
 
-                {false && (() => {
-                  const iso = scheduledIsoFor(b);
-                  const scheduledMs = iso ? new Date(iso as string).getTime() : NaN;
-                  const deadline = acceptanceDeadlineMs({
-                    createdAtIso: b.created_at || null,
-                    scheduledIso: iso || null,
-                  });
-
-                  const acceptanceExpired = deadline != null ? Date.now() > (deadline as number) : false;
-                  // Hard stop close to test time: don't allow last‑second accepts.
-                  const tooLate = Number.isFinite(scheduledMs) && Date.now() > scheduledMs - 15 * 60 * 1000;
+                  const twLabel =
+                    tw === "morning" ? "Morning" :
+                    tw === "early_afternoon" ? "Early afternoon" :
+                    tw === "late_afternoon" ? "Late afternoon" : tw;
 
                   return (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ fontWeight: 900 }}>
-                        Acceptance window: {deadline != null ? <Countdown deadlineMs={deadline as number} /> : "—"}
+                    <div
+                      style={{
+                        marginTop: 10,
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 14,
+                        padding: 12,
+                      }}
+                    >
+                      <div style={{ fontWeight: 950, color: "#0f172a" }}>Test-taker info</div>
+                      <div style={{ marginTop: 6, color: "#334155", fontWeight: 800, lineHeight: 1.35 }}>
+                        {intro ? <>“{intro}”</> : <span style={{ color: "#64748b" }}>No intro provided.</span>}
                       </div>
-                      {(acceptanceExpired || tooLate) && (
-                        <div style={{ marginTop: 6, color: "#b91c1c", fontWeight: 900 }}>
-                          This request is expired.
-                        </div>
-                      )}
+                      <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", color: "#475569", fontWeight: 850 }}>
+                        {tw ? <span style={{ padding: "4px 10px", borderRadius: 999, border: "1px solid #cbd5e1", background: "white" }}>Time window: {twLabel}</span> : null}
+                        {rq ? <span style={{ padding: "4px 10px", borderRadius: 999, border: "1px solid #cbd5e1", background: "white" }}>Registry area: {rq}</span> : null}
+                      </div>
                     </div>
                   );
                 })()}
+
+                <div style={{ marginTop: 10, color: "#64748b", fontWeight: 750, fontSize: 13 }}>
+                  Accept = pay deposit (unless credit covers it).
+                </div>
+
+                {(() => {
+  const iso = scheduledIsoFor(b);
+  const scheduledMs = typeof iso === "string" ? new Date(iso).getTime() : NaN;
+  const inPast = Number.isFinite(scheduledMs) && scheduledMs < Date.now();
+
+  const hours = acceptanceHoursFor({ createdAtIso: b.created_at ?? undefined, scheduledIso: iso || undefined });
+  const deadline = acceptanceDeadlineMs({ createdAtIso: b.created_at ?? undefined, scheduledIso: iso || undefined });
+
+  if (!deadline) return null;
+
+  const acceptanceExpired = Date.now() > (deadline as number);
+  const tooLate = Number.isFinite(scheduledMs) && Date.now() > scheduledMs - 15 * 60 * 1000;
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      {inPast || acceptanceExpired || tooLate ? (
+        <div style={{ color: "#b00020", fontWeight: 900 }}>
+          This request is expired{tooLate && !inPast ? " (too close to the scheduled time)." : "."}
+        </div>
+      ) : (
+        <div style={{ color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+          Accept window ({hours}h): <Countdown deadlineMs={deadline as number} />
+        </div>
+      )}
+    </div>
+  );
+})()}
 
                 <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button
@@ -1007,7 +1047,7 @@ return (
 
                const showRequestMeta = (b.status ?? null) !== "confirmed" && !b.owner_deposit_paid;
 
-               const hours = acceptanceHoursFor({ scheduledIso: scheduledIso || undefined });
+               const hours = acceptanceHoursFor({ createdAtIso: b.created_at ?? undefined, scheduledIso: scheduledIso || undefined });
                const deadline = acceptanceDeadlineMs({ createdAtIso: b.created_at ?? undefined, scheduledIso: scheduledIso || undefined });
 
                return (

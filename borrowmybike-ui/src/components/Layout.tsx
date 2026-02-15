@@ -23,6 +23,14 @@ export default function Layout() {
   const navg = useNavigate();
   const { user } = useAuth();
 
+  // Mobile menu
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Close menu on navigation
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [loc.pathname]);
+
   // Try a few common places Supabase user email might live
   const email =
     (user as any)?.email ||
@@ -78,6 +86,7 @@ export default function Layout() {
     minHeight: "100vh",
     background: "#f8fafc",
     color: "#0f172a",
+    overflowX: "hidden", // guard: never allow sideways scroll from layout wrappers
   };
 
   const header: React.CSSProperties = {
@@ -93,6 +102,8 @@ export default function Layout() {
     gridTemplateColumns: "auto 1fr auto",
     alignItems: "center",
     gap: 16,
+    position: "relative", // for mobile dropdown positioning
+    minWidth: 0,
   };
 
   /* BRAND */
@@ -100,10 +111,11 @@ export default function Layout() {
     display: "flex",
     alignItems: "center",
     textDecoration: "none",
+    minWidth: 0,
   };
 
   const brandLogo: React.CSSProperties = {
-    height: 52,
+    height: 48,
     width: "auto",
     display: "block",
   };
@@ -116,13 +128,16 @@ export default function Layout() {
     flexWrap: "wrap",
     alignItems: "center",
     fontWeight: 900,
+    minWidth: 0,
   };
 
   const navLink = (href: string): React.CSSProperties => ({
     textDecoration: "none",
     color: isActive(loc.pathname, href) ? "#16a34a" : "#0f172a",
     fontWeight: isActive(loc.pathname, href) ? 700 : 500,
-    borderBottom: isActive(loc.pathname, href) ? "2px solid #16a34a" : "2px solid transparent",
+    borderBottom: isActive(loc.pathname, href)
+      ? "2px solid #16a34a"
+      : "2px solid transparent",
     paddingBottom: 4,
     whiteSpace: "nowrap",
   });
@@ -133,7 +148,7 @@ export default function Layout() {
     flexDirection: "column", // stack buttons + meta lines
     alignItems: "flex-end",
     gap: 6,
-    minWidth: 190,
+    minWidth: 0, // IMPORTANT: fixed minWidth here causes mobile overflow
   };
 
   const rightButtons: React.CSSProperties = {
@@ -179,6 +194,46 @@ export default function Layout() {
     whiteSpace: "nowrap",
   };
 
+  // Mobile menu button
+  const mobileMenuBtn: React.CSSProperties = {
+    border: "1px solid #cbd5e1",
+    background: "white",
+    color: "#0f172a",
+    fontWeight: 900,
+    padding: "8px 12px",
+    borderRadius: 12,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  };
+
+  const mobilePanel: React.CSSProperties = {
+    position: "absolute",
+    top: "calc(100% + 10px)",
+    left: 20,
+    right: 20,
+    background: "white",
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
+    boxShadow: "0 10px 30px rgba(2, 6, 23, 0.12)",
+    padding: 12,
+    zIndex: 50,
+  };
+
+  const mobileMenuLink: React.CSSProperties = {
+    display: "block",
+    textDecoration: "none",
+    color: "#0f172a",
+    fontWeight: 900,
+    padding: "10px 10px",
+    borderRadius: 12,
+  };
+
+  const mobileMenuLinkActive: React.CSSProperties = {
+    ...mobileMenuLink,
+    background: "#f1f5f9",
+    color: "#16a34a",
+  };
+
   async function signOut() {
     await sb.auth.signOut();
     navg("/", { replace: true });
@@ -188,6 +243,7 @@ export default function Layout() {
     maxWidth: 1100,
     margin: "0 auto",
     padding: "0 16px 24px",
+    minWidth: 0,
   };
 
   const footer: React.CSSProperties = {
@@ -204,6 +260,7 @@ export default function Layout() {
     display: "grid",
     gridTemplateColumns: "2fr 1fr 1fr",
     gap: 16,
+    minWidth: 0
   };
 
   const footerTitle: React.CSSProperties = { fontWeight: 1000 };
@@ -214,6 +271,16 @@ export default function Layout() {
   };
 
   const creditsLabel = useMemo(() => formatMoney(creditsTotal), [creditsTotal]);
+
+  const mobileHrefList: Array<{ href: string; label: string }> = [
+    { href: "/", label: "Home" },
+    { href: "/browse", label: "Browse" },
+    { href: "/test-takers", label: "Taking a road test?" },
+    { href: "/mentors/start", label: "List your bike • Earn $100" },
+    { href: "/dashboard", label: "Dashboard" },
+    { href: "/rules", label: "Rules" },
+    { href: "/legal", label: "Legal" },
+  ];
 
   return (
     <div style={shell}>
@@ -226,17 +293,30 @@ export default function Layout() {
             <img src="/logo-borrowmybike.png" alt="BorrowMyBike" style={brandLogo} />
           </Link>
 
-          {/* CENTER NAV */}
-          <nav style={nav}>
-            <Link to="/" style={navLink("/")}>Home</Link>
-            <Link to="/browse" style={navLink("/browse")}>Browse</Link>
-            <Link to="/test-takers" style={navLink("/test-takers")}>Taking a road test?</Link>
-            <Link to="/mentors/start" style={navLink("/mentors")}>List your bike • Earn $100</Link>
+          {/* CENTER NAV (Desktop) + Mobile menu button */}
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minWidth: 0, gap: 10 }}>
+            <nav style={nav} className="bmb-nav">
+              <Link to="/" style={navLink("/")}>Home</Link>
+              <Link to="/browse" style={navLink("/browse")}>Browse</Link>
+              <Link to="/test-takers" style={navLink("/test-takers")}>Taking a road test?</Link>
+              <Link to="/mentors/start" style={navLink("/mentors")}>List your bike • Earn $100</Link>
 
-            <Link to="/dashboard" style={navLink("/dashboard")}>Dashboard</Link>
-            <Link to="/rules" style={navLink("/rules")}>Rules</Link>
-            <Link to="/legal" style={navLink("/legal")}>Legal</Link>
-          </nav>
+              <Link to="/dashboard" style={navLink("/dashboard")}>Dashboard</Link>
+              <Link to="/rules" style={navLink("/rules")}>Rules</Link>
+              <Link to="/legal" style={navLink("/legal")}>Legal</Link>
+            </nav>
+
+            <button
+              type="button"
+              className="bmb-mobile-menu-btn"
+              style={mobileMenuBtn}
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen((v) => !v)}
+            >
+              {mobileMenuOpen ? "Close" : "Menu"}
+            </button>
+          </div>
 
           {/* AUTH AREA */}
           <div style={rightArea}>
@@ -265,6 +345,42 @@ export default function Layout() {
               </div>
             )}
           </div>
+
+          {/* Mobile dropdown panel */}
+          {mobileMenuOpen && (
+            <div className="bmb-mobile-menu-panel" style={mobilePanel} role="menu" aria-label="Site menu">
+              {mobileHrefList.map((item) => {
+                const active = isActive(loc.pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    to={item.href}
+                    style={active ? mobileMenuLinkActive : mobileMenuLink}
+                    role="menuitem"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+
+              {/* Extra account actions on mobile (helpful when nav hidden) */}
+              <div style={{ marginTop: 8, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
+                {user ? (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
+                      Credits: {creditsLabel}
+                    </div>
+                    <button onClick={signOut} style={{ ...signOutBtn, width: "100%" }}>Sign out</button>
+                  </div>
+                ) : (
+                  <Link to="/auth" style={{ ...authLink, display: "block", textAlign: "center" }} state={{ from: loc.pathname }}>
+                    Sign in
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -273,7 +389,7 @@ export default function Layout() {
       </main>
 
       <footer style={footer}>
-        <div style={footerInner}>
+        <div style={footerInner} className="bmb-footer-inner">
           <div>
             <div style={footerTitle}>BorrowMyBike / Class6Loaner</div>
             <div style={{ marginTop: 8, color: "#475569", fontWeight: 800 }}>
