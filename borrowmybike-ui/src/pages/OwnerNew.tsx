@@ -12,6 +12,7 @@ type Bike = {
   make: string | null;
   model: string | null;
   year: number | null;
+  engine_size: number | null;
   city: string | null;
   province: ProvinceCode | null;
   is_active: boolean;
@@ -80,6 +81,7 @@ export default function OwnerNew() {
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
   const [year, setYear] = useState<string>("");
+  const [engineSize, setEngineSize] = useState<string>("" )
   const [city, setCity] = useState("");
   const [province, setProvince] = useState<string>(""); // force selection
   const [active, setActive] = useState(true);
@@ -127,7 +129,7 @@ export default function OwnerNew() {
 
       const res = await sb
         .from("bikes")
-        .select("id, owner_id, make, model, year, city, province, is_active")
+        .select("id, owner_id, make, model, year, engine_size, city, province, is_active")
         .eq("owner_id", me)
         .limit(1)
         .maybeSingle();
@@ -146,12 +148,14 @@ export default function OwnerNew() {
         setMake(b.make || "");
         setModel(b.model || "");
         setYear(b.year ? String(b.year) : "");
+        setEngineSize((b as any).engine_size != null ? String((b as any).engine_size) : "");
         setCity(b.city || "");
         setProvince(b.province || "");
         setActive(!!b.is_active);
       } else {
         // no bike yet -> force province selection before save
         setProvince("");
+        setEngineSize("");
       }
 
       setLoading(false);
@@ -199,19 +203,37 @@ export default function OwnerNew() {
     setFile(f);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(f ? URL.createObjectURL(f) : null);
-  }
-
-  function validateProvinceOrThrow() {
+  }  function validateProvinceOrThrow() {
     // ✅ Option A: allow listing in ALL provinces. Only require selection.
     if (!province) {
       throw new Error("Please select a province.");
     }
   }
 
+  function validateRequiredBikeFieldsOrThrow() {
+    // Make required fields explicit so mentors can't accidentally create an incomplete listing.
+    const mk = make.trim();
+    const md = model.trim();
+    const ct = city.trim();
+    const yr = year.trim() ? Number(year.trim()) : NaN;
+    const cc = engineSize.trim() ? Number(engineSize.trim()) : NaN;
+
+    if (!mk) throw new Error("Please enter your bike make.");
+    if (!md) throw new Error("Please enter your bike model.");
+    if (!Number.isFinite(yr) || yr < 1950 || yr > new Date().getFullYear() + 1) {
+      throw new Error("Please enter a valid bike year.");
+    }
+    if (!Number.isFinite(cc) || cc <= 0 || cc > 2500) {
+      throw new Error("Please enter a valid engine size (cc).");
+    }
+    if (!ct) throw new Error("Please enter your city.");
+  }
+
   async function ensureBikeRow(): Promise<Bike> {
     if (!me) throw new Error("Not signed in");
 
     validateProvinceOrThrow();
+    validateRequiredBikeFieldsOrThrow();
 
     // If already exists, return it
     if (bike) return bike;
@@ -224,11 +246,12 @@ export default function OwnerNew() {
         make: make || null,
         model: model || null,
         year: year ? Number(year) : null,
+        engine_size: engineSize ? Number(engineSize) : null,
         city: city || null,
         province: province as ProvinceCode,
         is_active: active,
       })
-      .select("id, owner_id, make, model, year, city, province, is_active")
+      .select("id, owner_id, make, model, year, engine_size, city, province, is_active")
       .single();
 
     if (insertRes.error) throw insertRes.error;
@@ -271,6 +294,7 @@ export default function OwnerNew() {
       setErr(null);
 
       validateProvinceOrThrow();
+      validateRequiredBikeFieldsOrThrow();
 
       const b = await ensureBikeRow();
 
@@ -280,6 +304,7 @@ export default function OwnerNew() {
           make: make || null,
           model: model || null,
           year: year ? Number(year) : null,
+        engine_size: engineSize ? Number(engineSize) : null,
           city: city || null,
           province: province as ProvinceCode,
           is_active: active,
@@ -295,7 +320,7 @@ export default function OwnerNew() {
 
       const reload = await sb
         .from("bikes")
-        .select("id, owner_id, make, model, year, city, province, is_active")
+        .select("id, owner_id, make, model, year, engine_size, city, province, is_active")
         .eq("owner_id", me)
         .limit(1)
         .maybeSingle();
@@ -482,22 +507,36 @@ export default function OwnerNew() {
           <>
             <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
-                <div style={{ fontWeight: 450, marginBottom: 6 }}>Make</div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>Make <span style={{ color: "#b00020" }}>*</span></div>
                 <input value={make} onChange={(e) => setMake(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
               </div>
 
               <div>
-                <div style={{ fontWeight: 450, marginBottom: 6 }}>Model</div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>Model <span style={{ color: "#b00020" }}>*</span></div>
                 <input value={model} onChange={(e) => setModel(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
               </div>
 
               <div>
-                <div style={{ fontWeight: 450, marginBottom: 6 }}>Year</div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>Year <span style={{ color: "#b00020" }}>*</span></div>
                 <input value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
               </div>
 
               <div>
-                <div style={{ fontWeight: 450, marginBottom: 6 }}>City</div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>
+                  Engine size (cc) <span style={{ color: "#b00020" }}>*</span>
+                </div>
+                <input
+                  value={engineSize}
+                  onChange={(e) => setEngineSize(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="e.g., 125"
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }}
+                />
+              </div>
+
+
+              <div>
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>City <span style={{ color: "#b00020" }}>*</span></div>
                 <input value={city} onChange={(e) => setCity(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
               </div>
 
@@ -558,9 +597,9 @@ export default function OwnerNew() {
                 }}
               >
                 {previewUrl ? (
-                  <img src={previewUrl} alt="Preview" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  <img src={previewUrl} alt="Preview" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
                 ) : bike && cover ? (
-                  <img src={cover} alt="Cover" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  <img src={cover} alt="Cover" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
                 ) : (
                   <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 450 }}>
                     No photo yet

@@ -133,10 +133,10 @@ export default function Layout() {
 
   const navLink = (href: string): React.CSSProperties => ({
     textDecoration: "none",
-    color: isActive(loc.pathname, href) ? "#16a34a" : "#0f172a",
+    color: isActive(loc.pathname, href) ? "#C9A227" : "#0f172a",
     fontWeight: isActive(loc.pathname, href) ? 700 : 500,
     borderBottom: isActive(loc.pathname, href)
-      ? "2px solid #16a34a"
+      ? "2px solid #C9A227"
       : "2px solid transparent",
     paddingBottom: 4,
     whiteSpace: "nowrap",
@@ -231,7 +231,7 @@ export default function Layout() {
   const mobileMenuLinkActive: React.CSSProperties = {
     ...mobileMenuLink,
     background: "#f1f5f9",
-    color: "#16a34a",
+    color: "#C9A227",
   };
 
   async function signOut() {

@@ -146,6 +146,10 @@ export default function OwnerStart() {
           Full terms and cancellation rules are listed in Legal.
         </div>
 
+        <div style={{ marginTop: 8, color: "#475569", fontWeight: 700 }}>
+          Damage &amp; responsibility process: <Link to="/legal#damage" style={{ fontWeight: 950 }}>Read how incidents are handled →</Link>
+        </div>
+
         <div className="btnRow" style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <Link to="/legal" style={btn}>
             Legal / Policies →

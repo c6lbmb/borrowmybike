@@ -293,7 +293,9 @@ export default function Home() {
           <div style={cardTitle}>Insurance awareness</div>
           <div style={cardText}>
             Mentors provide bikes under permissive use (not renting). See{" "}
-            <Link to="/legal" style={smallLink}>Legal &amp; Policies</Link>.
+            <Link to="/legal" style={smallLink}>Legal &amp; Policies</Link>{" "}
+            and{" "}
+            <Link to="/legal#damage" style={smallLink}>Damage &amp; responsibility</Link>.
           </div>
         </div>
       </div>

@@ -212,6 +212,64 @@ export default function Legal() {
           platform.
         </div>
       </div>
+
+
+      {/* Damage */}
+      <div style={card} id="damage">
+        <div style={h2}>Damage, incidents &amp; responsibility (clear process)</div>
+
+        <div style={p}>
+          We can’t guarantee that nothing could ever happen on a public road. What we <b>can</b> do is keep this structured,
+          documented, and limited to <b>registry road tests</b> — not open riding, not joyrides, not recreational rentals.
+        </div>
+
+        <div style={qaQ}>Key points</div>
+        <ul style={ul}>
+          <li>
+            The <b>security deposit</b> exists for accountability and fault outcomes — it is <b>not</b> intended to cover the
+            full value of a bike or major repairs.
+          </li>
+          <li>
+            If the <b>test-taker is at fault</b>, they are responsible for loss or damage according to the terms they accepted
+            at checkout and the applicable process (repairs/insurance).
+          </li>
+          <li>
+            If a <b>third party is at fault</b>, it proceeds through a normal insurance claim like any standard road incident.
+          </li>
+          <li>
+            BorrowMyBike / Class6Loaner is a <b>matching platform</b> and does not provide insurance coverage.
+          </li>
+        </ul>
+
+<div style={qaQ}>If something goes wrong (5 steps)</div>
+<ol style={ul}>
+  <li>
+    <b>Safety first.</b> If there’s an incident, prioritize safety and follow local requirements (pull over if safe,
+    contact emergency services if needed).
+  </li>
+  <li>
+    <b>Document.</b> Take clear photos, note the time and location, and record any relevant details
+    (including registry/examiner context if applicable).
+  </li>
+  <li>
+    <b>Report by email.</b> Both parties must email support as soon as reasonably possible with a short written summary
+    of what happened and attach any available photos or supporting documents.
+  </li>
+  <li>
+    <b>Review &amp; outcome.</b> The platform reviews both sides, applies the written rules for cancellations,
+    forfeitures, credits, and fault determinations, and records the outcome. Damage or repair handling then follows
+    the responsible party’s obligations and/or the standard insurance process.
+  </li>
+  <li>
+    <b>Close-out.</b> The booking is marked resolved once a decision is made. Repeated unsafe or dishonest behavior
+    may result in removal from the platform.
+  </li>
+</ol>
+        <div style={small}>
+          This section is written for clarity. It is not legal advice. If you have questions about coverage, confirm details with
+          your insurer.
+        </div>
+      </div>
     </div>
   );
 }

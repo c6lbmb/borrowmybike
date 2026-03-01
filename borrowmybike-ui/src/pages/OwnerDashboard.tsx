@@ -812,7 +812,7 @@ return (
                 <img
                   src={bikeThumb}
                   alt="Bike cover"
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
                   onError={(e) => {
                     // If no public object exists, show empty state (avoid broken image icon)
                     (e.currentTarget as HTMLImageElement).style.display = "none";

@@ -48,7 +48,9 @@ export default function App() {
         <Route path="/dashboard/mentor" element={<OwnerDashboard />} />
         <Route path="/dashboard/borrower" element={<BorrowerDashboard />} />
 
-        {/* Owner flows */}
+        {/* Mentor / owner flows */}
+        <Route path="/mentors" element={<Navigate to="/mentors/new" replace />} />
+        <Route path="/mentor" element={<Navigate to="/mentors/new" replace />} />
         <Route path="/mentors/start" element={<OwnerStart />} />
         <Route path="/mentors/new" element={<OwnerNew />} />
 

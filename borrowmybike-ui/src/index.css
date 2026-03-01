@@ -144,7 +144,7 @@ thead th { position: sticky; top: 0; }
 
 
 /* Typography defaults */
-:root{ --bmb-text:#0f172a; --bmb-muted:#334155; --bmb-green:#15803d; }
+:root{ --bmb-text:#0f172a; --bmb-muted:#334155; --bmb-green:#C9A227; }
 body{ font-weight:400; color:var(--bmb-text); }
 p, li, span{ font-weight:400; }
 strong, b{ font-weight:700; }
@@ -194,12 +194,12 @@ ol {
 }
 
 .main-nav a:hover {
-  color: #16a34a; /* brand green */
+  color: var(--bmb-green); /* brand gold */
 }
 
 .main-nav a.active {
-  color: #16a34a;
+  color: var(--bmb-green);
   font-weight: 700;
-  border-bottom: 2px solid #16a34a;
+  border-bottom: 2px solid var(--bmb-green);
   padding-bottom: 2px;
 }

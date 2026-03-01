@@ -17,6 +17,19 @@ type BikeRow = {
   province?: string | null;
 };
 
+type RegistryRow = {
+  id: string;
+  name: string;
+  city: string | null;
+  address: string | null;
+  province: string | null;
+  postal_code?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  is_active: boolean | null;
+  notes?: string | null;
+};
+
 function isoWithTzFromLocalDatetime(local: string) {
   const d = new Date(local);
   if (isNaN(d.getTime())) return null;
@@ -127,6 +140,9 @@ export default function RequestBooking() {
 
   const [timeWindow, setTimeWindow] = useState<"" | "morning" | "early_afternoon" | "late_afternoon">("");
   const [registryQuadrant, setRegistryQuadrant] = useState<"" | "NE" | "NW" | "SE" | "SW">("");
+  const [registryId, setRegistryId] = useState<string>("");
+  const [registries, setRegistries] = useState<RegistryRow[]>([]);
+  const [loadingRegistries, setLoadingRegistries] = useState(false);
   const [testTakerIntro, setTestTakerIntro] = useState<string>("");
 
   const [submitting, setSubmitting] = useState(false);
@@ -177,6 +193,56 @@ export default function RequestBooking() {
     loadBike();
   }, [bikeId]);
 
+  useEffect(() => {
+    async function loadRegistries() {
+      if (!bike) return;
+
+      const prov = (bike.province || "AB").toUpperCase();
+      const city = (bike.city || "").trim();
+
+      setLoadingRegistries(true);
+      setRegistries([]);
+      setRegistryId("");
+
+      // Prefer city-scoped registries to keep the dropdown short.
+      // If none exist for that city, fall back to province-wide.
+      let q = sb
+        .from("registries")
+        .select("id,name,city,address,province,is_active")
+        .eq("is_active", true)
+        .eq("province", prov)
+        .order("name", { ascending: true });
+
+      if (city) q = q.eq("city", city);
+
+      const first = await q;
+
+      if (!first.error && Array.isArray(first.data) && first.data.length > 0) {
+        setRegistries(first.data as any);
+        setLoadingRegistries(false);
+        return;
+      }
+
+      const fallback = await sb
+        .from("registries")
+        .select("id,name,city,address,province,is_active")
+        .eq("is_active", true)
+        .eq("province", prov)
+        .order("name", { ascending: true });
+
+      if (fallback.error) {
+        console.warn("Failed to load registries:", fallback.error);
+        setRegistries([]);
+      } else {
+        setRegistries((fallback.data as any) ?? []);
+      }
+
+      setLoadingRegistries(false);
+    }
+
+    loadRegistries();
+  }, [bike?.id]);
+
   const borrowerChecklist: ChecklistItem[] = useMemo(
     () => [
       {
@@ -219,9 +285,19 @@ export default function RequestBooking() {
         label: (
           <>
             I have read and understand the <strong>Rules &amp; Process</strong> (cancellations, forfeitures, fault scenarios, and force-majeure).
-            I won’t say “I didn’t know.”
-            {" "}
+            I won’t say “I didn’t know.”{" "}
             <Link to="/legal" style={{ fontWeight: 950 }}>View rules →</Link>
+          </>
+        ),
+      },
+      {
+        id: "damage_ack",
+        label: (
+          <>
+            I understand that if I cause <strong>loss or damage</strong> during the road test, I may be responsible according to the
+            terms I accepted at checkout.
+            {" "}
+            <Link to="/legal#damage" style={{ fontWeight: 950 }}>Damage &amp; responsibility →</Link>
           </>
         ),
       },
@@ -261,6 +337,7 @@ export default function RequestBooking() {
 
 
     if (!registryQuadrant) return setErr("Please select the registry area (NE / NW / SE / SW).");
+    if (registries.length > 0 && !registryId) return setErr("Please select your registry location from the list.");
     if (!testTakerIntro.trim()) return setErr("Please write a short intro (shown to the mentor).");
 
     const whenIso = isoWithTzFromLocalDatetime(whenLocal);
@@ -273,7 +350,7 @@ export default function RequestBooking() {
       booking_date: whenIso,
       scheduled_start_at: whenIso,
       duration_minutes: 30,
-      registry_id: null as string | null,
+      registry_id: registryId ? registryId : (null as string | null),
       time_window: timeWindow || null,
       registry_quadrant: registryQuadrant || null,
       test_taker_intro: (testTakerIntro || "").trim() || null,
@@ -489,6 +566,48 @@ export default function RequestBooking() {
                   </div>
                   <div style={{ color: "#64748b", fontWeight: 600 }}>
                     Optional: helps mentors plan.
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ fontWeight: 900 }}>
+                    Registry location
+                    {registries.length ? null : (
+                      <span style={{ color: "#64748b", fontWeight: 700 }}> (optional until registries are loaded)</span>
+                    )}
+                  </div>
+                  <select
+                    value={registryId}
+                    onChange={(e) => setRegistryId(e.target.value)}
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      border: "1px solid #cbd5e1",
+                      fontWeight: 750,
+                      color: "#0f172a",
+                      background: "white",
+                    }}
+                  >
+                    <option value="">
+                      {loadingRegistries
+                        ? "Loading registries…"
+                        : registries.length
+                          ? "Select a registry…"
+                          : "(Not loaded yet)"}
+                    </option>
+                    {registries.map((r) => {
+                      const line = [r.name, r.address].filter(Boolean).join(" — ");
+                      const sub = [r.city, r.province].filter(Boolean).join(", ");
+                      const label = sub ? `${line} (${sub})` : line;
+                      return (
+                        <option key={r.id} value={r.id}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <div style={{ color: "#64748b", fontWeight: 600 }}>
+                    Choose the registry you booked. Exact address is stored and shared after acceptance.
                   </div>
                 </div>
 
