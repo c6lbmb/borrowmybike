@@ -7,6 +7,20 @@ import { AuthProvider } from "./auth/AuthProvider";
 // IMPORTANT: your project uses this path
 import "./styles/app.css";
 
+// PWA: install-to-home-screen + offline shell
+import { registerSW } from "virtual:pwa-register";
+
+
+registerSW({
+  immediate: true,
+  onOfflineReady() {
+    console.log("[PWA] Offline ready");
+  },
+  onNeedRefresh() {
+    console.log("[PWA] New content available; refresh to update.");
+  },
+});
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AuthProvider>

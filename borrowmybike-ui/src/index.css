@@ -203,3 +203,14 @@ ol {
   border-bottom: 2px solid var(--bmb-green);
   padding-bottom: 2px;
 }
+/* Mobile-only install button under logo */
+.bmb-install-under-logo {
+  display: none;
+  margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .bmb-install-under-logo {
+    display: block;
+  }
+}

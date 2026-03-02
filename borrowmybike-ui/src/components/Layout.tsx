@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import ScrollToTop from "./ScrollToTop";
 import { useAuth } from "../auth/useAuth";
 import { sb } from "../lib/supabase";
+import InstallPwaButton from "./InstallPwaButton";
 
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
@@ -288,11 +289,16 @@ export default function Layout() {
 
       <header style={header}>
         <div style={headerInner}>
-          {/* LOGO */}
-          <Link to="/" style={brand} aria-label="Home">
-            <img src="/logo-borrowmybike.png" alt="BorrowMyBike" style={brandLogo} />
-          </Link>
+         {/* LOGO + (mobile-only) install */}
+<div className="bmb-brand-stack" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+  <Link to="/" style={brand} aria-label="Home">
+    <img src="/logo-borrowmybike.png" alt="BorrowMyBike" style={brandLogo} />
+  </Link>
 
+  <div className="bmb-install-under-logo">
+    <InstallPwaButton visible />
+  </div>
+</div>
           {/* CENTER NAV (Desktop) + Mobile menu button */}
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minWidth: 0, gap: 10 }}>
             <nav style={nav} className="bmb-nav">
@@ -345,6 +351,8 @@ export default function Layout() {
               </div>
             )}
           </div>
+
+          
 
           {/* Mobile dropdown panel */}
           {mobileMenuOpen && (
