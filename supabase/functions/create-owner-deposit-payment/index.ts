@@ -2,6 +2,8 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2?target=deno";
+import { sendEmail } from "../_shared/sendEmail.ts";
+import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,6 +62,107 @@ function cents(n: number) {
 
 function scheduledIsoFor(booking: any): string | null {
   return booking?.scheduled_start_at ?? booking?.booking_date ?? null;
+}
+async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, owner_id, borrower_id, booking_date")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) {
+    console.error("❌ accepted-email booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  if (!booking?.borrower_id) {
+    console.warn("⚠️ booking missing borrower_id, skipping accepted email", { bookingId });
+    return;
+  }
+
+  const { data: borrower, error: borrowerError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", booking.borrower_id)
+    .maybeSingle();
+
+  if (borrowerError) {
+    console.error("❌ borrower lookup failed:", borrowerError);
+    throw borrowerError;
+  }
+
+  if (!borrower?.email) {
+    console.warn("⚠️ borrower missing email, skipping accepted email", {
+      bookingId,
+      borrowerId: booking.borrower_id,
+    });
+    return;
+  }
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: borrower.id,
+    notificationType: "accepted_borrower",
+  });
+
+  if (alreadySent) {
+    console.log("ℹ️ borrower accepted email already sent, skipping", {
+      bookingId,
+      borrowerId: borrower.id,
+    });
+    return;
+  }
+
+  const borrowerName =
+    borrower.first_name?.trim() ||
+    borrower.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = booking.booking_date
+    ? new Date(booking.booking_date).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "your upcoming road test";
+
+  await sendEmail({
+    to: borrower.email,
+    subject: "Your BorrowMyBike request was accepted",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${borrowerName},</p>
+
+        <p>Your BorrowMyBike request was accepted by the mentor.</p>
+
+        <p>
+          <strong>Test time:</strong> ${bookingDateText}
+        </p>
+
+        <p>Please review your booking details and prepare for your road test.</p>
+
+        <p>
+          <a href="https://borrowmybike.ca/borrower-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            View booking
+          </a>
+        </p>
+
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: borrower.id,
+    emailTo: borrower.email,
+    notificationType: "accepted_borrower",
+    meta: {
+      source: "create-owner-deposit-payment",
+      booking_date: booking.booking_date ?? null,
+    },
+  });
 }
 
 // ✅ Rahim rule: acceptance window is based on how far in advance the booking was requested
@@ -262,6 +365,11 @@ serve(async (req: Request) => {
       .eq("id", booking_id);
 
     if (upErr) return json(500, { error: "Failed to update booking owner_deposit_paid", details: upErr });
+    try {
+      await sendBorrowerAcceptedEmailIfNeeded(booking_id);
+    } catch (emailError) {
+      console.error("❌ borrower accepted email failed:", emailError);
+    }
 
 await auditLog({
   booking_id,

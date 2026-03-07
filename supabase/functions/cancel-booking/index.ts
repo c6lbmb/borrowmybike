@@ -1,4 +1,6 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
+import { sendEmail } from "../_shared/sendEmail.ts";
+import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -163,8 +165,303 @@ async function stripeRefundPartial(
   }
   return data;
 }
+async function sendBorrowerDeclinedEmailIfNeeded(
+  supabase: any,
+  bookingId: string
+) {
+    const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, borrower_id, booking_date")
+    .eq("id", bookingId)
+    .maybeSingle();
 
-serve(async (req) => {
+  if (bookingError) {
+    console.error("❌ decline-email booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  if (!booking?.borrower_id) {
+    console.warn("⚠️ booking missing borrower_id, skipping decline email", { bookingId });
+    return;
+  }
+
+  const { data: borrower, error: borrowerError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", booking.borrower_id)
+    .maybeSingle();
+
+  if (borrowerError) {
+    console.error("❌ borrower lookup failed:", borrowerError);
+    throw borrowerError;
+  }
+
+  if (!borrower?.email) {
+    console.warn("⚠️ borrower missing email, skipping decline email", {
+      bookingId,
+      borrowerId: booking.borrower_id,
+    });
+    return;
+  }
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: borrower.id,
+    notificationType: "declined_borrower",
+  });
+
+  if (alreadySent) {
+    console.log("ℹ️ borrower decline email already sent, skipping", {
+      bookingId,
+      borrowerId: borrower.id,
+    });
+    return;
+  }
+
+  const borrowerName =
+    borrower.first_name?.trim() ||
+    borrower.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = booking.booking_date
+    ? new Date(booking.booking_date).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "your requested road test";
+
+  await sendEmail({
+    to: borrower.email,
+    subject: "Your BorrowMyBike request was declined",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${borrowerName},</p>
+
+        <p>Unfortunately the mentor declined your BorrowMyBike request.</p>
+
+        <p>
+          <strong>Requested time:</strong> ${bookingDateText}
+        </p>
+
+        <p>No charges were applied beyond the booking request.</p>
+
+        <p>You can request another bike or time from the marketplace.</p>
+
+        <p>
+          <a href="https://borrowmybike.ca/browse-bikes" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            Find another bike
+          </a>
+        </p>
+
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: borrower.id,
+    emailTo: borrower.email,
+    notificationType: "declined_borrower",
+    meta: {
+      source: "cancel-booking",
+      booking_date: booking.booking_date ?? null,
+    },
+  });
+}
+async function sendOwnerBorrowerCancelledPreAcceptEmailIfNeeded(
+  supabase: any,
+  bookingId: string
+) {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, owner_id, booking_date")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) {
+    console.error("❌ owner pre-accept cancel booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  if (!booking?.owner_id) {
+    console.warn("⚠️ booking missing owner_id, skipping owner pre-accept cancel email", { bookingId });
+    return;
+  }
+
+  const { data: owner, error: ownerError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", booking.owner_id)
+    .maybeSingle();
+
+  if (ownerError) {
+    console.error("❌ owner lookup failed:", ownerError);
+    throw ownerError;
+  }
+
+  if (!owner?.email) {
+    console.warn("⚠️ owner missing email, skipping owner pre-accept cancel email", {
+      bookingId,
+      ownerId: booking.owner_id,
+    });
+    return;
+  }
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: owner.id,
+    notificationType: "borrower_cancelled_pre_accept_owner_notified",
+  });
+
+  if (alreadySent) return;
+
+  const ownerName =
+    owner.first_name?.trim() ||
+    owner.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = booking.booking_date
+    ? new Date(booking.booking_date).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "the requested road test";
+
+  await sendEmail({
+    to: owner.email,
+    subject: "The test-taker cancelled the request",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${ownerName},</p>
+        <p>The test-taker cancelled the BorrowMyBike request before you accepted it.</p>
+        <p><strong>Requested time:</strong> ${bookingDateText}</p>
+        <p>No owner deposit was charged.</p>
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: owner.id,
+    emailTo: owner.email,
+    notificationType: "borrower_cancelled_pre_accept_owner_notified",
+    meta: {
+      source: "cancel-booking",
+      booking_date: booking.booking_date ?? null,
+    },
+  });
+}
+async function sendAcceptedCancellationEmailIfNeeded(
+  supabase: any,
+  bookingId: string,
+  recipientRole: "owner" | "borrower",
+  cancelledBy: "owner" | "borrower",
+  early: boolean
+) {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, owner_id, borrower_id, booking_date")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) {
+    console.error("❌ accepted-cancel booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  const userId = recipientRole === "owner" ? booking?.owner_id : booking?.borrower_id;
+  if (!userId) {
+    console.warn("⚠️ missing recipient id for accepted cancellation email", { bookingId, recipientRole });
+    return;
+  }
+
+  const { data: user, error: userError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (userError) {
+    console.error("❌ accepted-cancel user lookup failed:", userError);
+    throw userError;
+  }
+
+  if (!user?.email) {
+    console.warn("⚠️ recipient missing email for accepted cancellation email", { bookingId, recipientRole, userId });
+    return;
+  }
+
+  const notificationType =
+    recipientRole === "owner"
+      ? "accepted_booking_cancelled_owner_notified"
+      : "accepted_booking_cancelled_borrower_notified";
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: user.id,
+    notificationType,
+  });
+
+  if (alreadySent) return;
+
+  const userName =
+    user.first_name?.trim() ||
+    user.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = booking.booking_date
+    ? new Date(booking.booking_date).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "your scheduled road test";
+
+  const cancellerText = cancelledBy === "owner" ? "mentor" : "test-taker";
+  const timingText = early ? "more than 5 days before the test" : "within 5 days of the test";
+
+  await sendEmail({
+    to: user.email,
+    subject: "A confirmed BorrowMyBike booking was cancelled",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${userName},</p>
+        <p>A confirmed BorrowMyBike booking was cancelled by the ${cancellerText}.</p>
+        <p><strong>Scheduled time:</strong> ${bookingDateText}</p>
+        <p><strong>Timing:</strong> ${timingText}</p>
+        <p>Please log in to review the booking outcome, credits, and any refund details.</p>
+        <p>
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            View booking details
+          </a>
+        </p>
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: user.id,
+    emailTo: user.email,
+    notificationType,
+    meta: {
+      source: "cancel-booking",
+      cancelled_by: cancelledBy,
+      early,
+      booking_date: booking.booking_date ?? null,
+    },
+  });
+}
+
+serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
@@ -314,6 +611,19 @@ return json(200, {
       note: cancel_scenario,
     });
 
+   if (isBorrowerCancel) {
+  try {
+    await sendOwnerBorrowerCancelledPreAcceptEmailIfNeeded(supabase, booking_id);
+  } catch (emailError) {
+    console.error("❌ owner pre-accept cancel email failed:", emailError);
+  }
+} else {
+  try {
+    await sendBorrowerDeclinedEmailIfNeeded(supabase, booking_id);
+  } catch (emailError) {
+    console.error("❌ borrower decline email failed:", emailError);
+  }
+}
     return json(200, {
       ok: true,
       booking_id,
@@ -503,6 +813,30 @@ return json(200, {
     action: early ? "cancel_gt_5_days" : "cancel_lte_5_days",
     note: `cancellerRefund=${cancellerRefund}; platformIncome=${platformIncome}; refundResult=${refundResult?.via ?? "none"}`,
   });
+
+  try {
+  await sendAcceptedCancellationEmailIfNeeded(
+    supabase,
+    booking_id,
+    "owner",
+    canceller as "owner" | "borrower",
+    early
+  );
+} catch (emailError) {
+  console.error("❌ accepted cancellation owner email failed:", emailError);
+}
+
+try {
+  await sendAcceptedCancellationEmailIfNeeded(
+    supabase,
+    booking_id,
+    "borrower",
+    canceller as "owner" | "borrower",
+    early
+  );
+} catch (emailError) {
+  console.error("❌ accepted cancellation borrower email failed:", emailError);
+}
 
 return json(200, {
     ok: true,

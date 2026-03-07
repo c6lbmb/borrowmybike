@@ -169,7 +169,7 @@ export default function Rules() {
         </ul>
 
         <div style={small}>
-          This process exists to ensure the bike is returned and both parties are
+          This process exists to ensure that both parties are
           protected with clear timestamps.
         </div>
       </div>
@@ -187,8 +187,7 @@ export default function Rules() {
         </div>
         <ul style={ul}>
           <li>
-            The cancelling party receives <b>platform credit</b> equal to their
-            amount <b>minus a 25% admin fee</b>.
+            You can cancel, but a <b>25% admin fee applies</b>. The remaining amount is refunded to the original payment method.
           </li>
           <li>
             The non-cancelling party receives <b>$150 platform credit</b> to rebook
@@ -201,7 +200,7 @@ export default function Rules() {
         </div>
         <ul style={ul}>
           <li>
-            The cancelling party <b>forfeits</b> the applicable fee/deposit.
+            The cancellation is considered late because the other person has likely planned their schedule and the slot is hard to replace. In most cases, the cancelling party <b>forfeits their deposit</b> under the platform rules.
           </li>
           <li>
             The non-cancelling party receives <b>$150 platform credit</b> to rebook
@@ -209,9 +208,22 @@ export default function Rules() {
           </li>
         </ul>
 
+         <div style={{ ...p, marginTop: 12 }}>
+          <b>4C) Exception Review (rare)</b>
+        </div>
+        <ul style={ul}>
+          <li>
+            If a late cancellation is caused by something truly outside your control (e.g., serious medical emergency, immediate family death, etc.), email support right away with a short explanation. <b>We’ll review for a fair outcome</b>, 
+            but the default rule still applies unless verified circumstances support an exception.          
+          </li>
+        </ul>
+
         <div style={small}>
           Credits are designed to help the non-cancelling party rebook without
           being stuck paying twice.
+        </div>
+         <div style={small}>
+          These rules exist to keep commitments real once two people are introduced and a test slot is on the line.
         </div>
       </div>
 

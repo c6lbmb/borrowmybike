@@ -252,9 +252,13 @@ export default function Legal() {
     (including registry/examiner context if applicable).
   </li>
   <li>
-    <b>Report by email.</b> Both parties must email support as soon as reasonably possible with a short written summary
-    of what happened and attach any available photos or supporting documents.
-  </li>
+  <b>Report by email.</b> Both parties must email{" "}
+  <a href="mailto:support@borrowmybike.ca" style={{ fontWeight: 900 }}>
+    support@borrowmybike.ca
+  </a>{" "}
+  as soon as reasonably possible with a short written summary of what happened and attach any available photos or
+  supporting documents.
+</li>
   <li>
     <b>Review &amp; outcome.</b> The platform reviews both sides, applies the written rules for cancellations,
     forfeitures, credits, and fault determinations, and records the outcome. Damage or repair handling then follows

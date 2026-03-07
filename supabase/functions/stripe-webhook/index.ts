@@ -1,6 +1,8 @@
 // supabase/functions/stripe-webhook/index.ts
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+import { sendEmail } from "../_shared/sendEmail.ts";
+import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
 
 const supabaseUrl = Deno.env.get("MY_SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY")!;
@@ -98,8 +100,207 @@ async function verifyStripeSignatureOrThrow(args: {
 
   throw new Error("Stripe signature verification failed");
 }
+async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, owner_id, borrower_id, booking_date")
+    .eq("id", bookingId)
+    .maybeSingle();
 
-serve(async (req) => {
+  if (bookingError) {
+    console.error("❌ booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  if (!booking?.owner_id) {
+    console.warn("⚠️ booking missing owner_id, skipping email", { bookingId });
+    return;
+  }
+
+  const { data: owner, error: ownerError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", booking.owner_id)
+    .maybeSingle();
+
+  if (ownerError) {
+    console.error("❌ owner lookup failed:", ownerError);
+    throw ownerError;
+  }
+
+  if (!owner?.email) {
+    console.warn("⚠️ owner missing email, skipping email", { bookingId, ownerId: booking.owner_id });
+    return;
+  }
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: owner.id,
+    notificationType: "request_created_owner",
+  });
+
+  if (alreadySent) {
+    console.log("ℹ️ owner request email already sent, skipping", { bookingId, ownerId: owner.id });
+    return;
+  }
+
+  const ownerName =
+    owner.first_name?.trim() ||
+    owner.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = booking.booking_date
+    ? new Date(booking.booking_date).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "your upcoming road test";
+
+  const registryText = "the selected registry";
+
+  await sendEmail({
+    to: owner.email,
+    subject: "New BorrowMyBike request",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${ownerName},</p>
+
+        <p>You have a new BorrowMyBike road-test request.</p>
+
+        <p>
+          <strong>Registry:</strong> ${registryText}<br />
+          <strong>Test time:</strong> ${bookingDateText}
+        </p>
+
+        <p>Please log in to review the request and decide whether to accept.</p>
+
+        <p>
+          <a href="https://borrowmybike.ca/owner-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            Review request
+          </a>
+        </p>
+
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: owner.id,
+    emailTo: owner.email,
+    notificationType: "request_created_owner",
+    meta: {
+      source: "stripe-webhook",
+      booking_date: booking.booking_date ?? null,
+    },
+  });
+}
+async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, owner_id, borrower_id, booking_date")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) {
+    console.error("❌ accepted-email booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  if (!booking?.borrower_id) {
+    console.warn("⚠️ booking missing borrower_id, skipping accepted email", { bookingId });
+    return;
+  }
+
+  const { data: borrower, error: borrowerError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", booking.borrower_id)
+    .maybeSingle();
+
+  if (borrowerError) {
+    console.error("❌ borrower lookup failed:", borrowerError);
+    throw borrowerError;
+  }
+
+  if (!borrower?.email) {
+    console.warn("⚠️ borrower missing email, skipping accepted email", {
+      bookingId,
+      borrowerId: booking.borrower_id,
+    });
+    return;
+  }
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: borrower.id,
+    notificationType: "accepted_borrower",
+  });
+
+  if (alreadySent) {
+    console.log("ℹ️ borrower accepted email already sent, skipping", {
+      bookingId,
+      borrowerId: borrower.id,
+    });
+    return;
+  }
+
+  const borrowerName =
+    borrower.first_name?.trim() ||
+    borrower.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = booking.booking_date
+    ? new Date(booking.booking_date).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "your upcoming road test";
+
+  await sendEmail({
+    to: borrower.email,
+    subject: "Your BorrowMyBike request was accepted",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${borrowerName},</p>
+
+        <p>Your BorrowMyBike request was accepted by the mentor.</p>
+
+        <p>
+          <strong>Test time:</strong> ${bookingDateText}
+        </p>
+
+        <p>Please review your booking details and prepare for your road test.</p>
+
+        <p>
+          <a href="https://borrowmybike.ca/borrower-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            View booking
+          </a>
+        </p>
+
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: borrower.id,
+    emailTo: borrower.email,
+    notificationType: "accepted_borrower",
+    meta: {
+      source: "stripe-webhook",
+      booking_date: booking.booking_date ?? null,
+    },
+  });
+}
+
+serve(async (req: Request) => {
   if (req.method !== "POST") return new Response("Only POST", { status: 405 });
 
   const rawBody = await req.text();
@@ -171,6 +372,20 @@ serve(async (req) => {
 
       if (bookingError) console.error("bookings update error:", bookingError);
     }
+    if (bookingId && paymentType === "borrower_booking") {
+  try {
+    await sendOwnerRequestEmailIfNeeded(bookingId);
+  } catch (emailError) {
+    console.error("❌ owner request email failed:", emailError);
+  }
+}
+     if (bookingId && paymentType === "owner_deposit") {
+       try {
+         await sendBorrowerAcceptedEmailIfNeeded(bookingId);
+       } catch (emailError) {
+         console.error("❌ borrower accepted email failed:", emailError);
+       }
+     }
   }
 
   return new Response(JSON.stringify({ received: true }), {

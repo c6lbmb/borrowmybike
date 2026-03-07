@@ -1,4 +1,6 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
+import { sendEmail } from "../_shared/sendEmail.ts";
+import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -73,8 +75,107 @@ async function callCancelBooking(opts: {
 
   return { ok: res.ok, status: res.status, payload };
 }
+async function sendBorrowerExpiredEmailIfNeeded(opts: {
+  supabase: any;
+  bookingId: string;
+  borrowerId: string | null;
+  scheduledIso?: string | null;
+  acceptanceHours: number;
+}) {
+  const { supabase, bookingId, borrowerId, scheduledIso, acceptanceHours } = opts;
 
-serve(async (req) => {
+  if (!borrowerId) {
+    console.warn("⚠️ missing borrowerId, skipping expired email", { bookingId });
+    return;
+  }
+
+  const { data: borrower, error: borrowerError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", borrowerId)
+    .maybeSingle();
+
+  if (borrowerError) {
+    console.error("❌ borrower lookup failed for expired email:", borrowerError);
+    throw borrowerError;
+  }
+
+  if (!borrower?.email) {
+    console.warn("⚠️ borrower missing email, skipping expired email", {
+      bookingId,
+      borrowerId,
+    });
+    return;
+  }
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId,
+    userId: borrower.id,
+    notificationType: "request_expired_borrower_notified",
+  });
+
+  if (alreadySent) {
+    console.log("ℹ️ borrower expiry email already sent, skipping", {
+      bookingId,
+      borrowerId: borrower.id,
+    });
+    return;
+  }
+
+  const borrowerName =
+    borrower.first_name?.trim() ||
+    borrower.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = scheduledIso
+    ? new Date(scheduledIso).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "your requested road test";
+
+  await sendEmail({
+    to: borrower.email,
+    subject: "Your BorrowMyBike request expired",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${borrowerName},</p>
+
+        <p>Your BorrowMyBike request expired because the mentor did not accept within the ${acceptanceHours}-hour acceptance window.</p>
+
+        <p>
+          <strong>Requested time:</strong> ${bookingDateText}
+        </p>
+
+        <p>Any rebooking credit or outcome has been applied under the platform rules.</p>
+
+        <p>
+          <a href="https://borrowmybike.ca/browse-bikes" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            Find another bike
+          </a>
+        </p>
+
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId,
+    userId: borrower.id,
+    emailTo: borrower.email,
+    notificationType: "request_expired_borrower_notified",
+    meta: {
+      source: "expire-bookings",
+      booking_date: scheduledIso ?? null,
+      acceptance_hours: acceptanceHours,
+    },
+  });
+}
+
+serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
@@ -118,7 +219,7 @@ if (incoming !== ADMIN_KEY) {
   // We keep the filter broad and compute expiry ourselves.
   const { data: bookings, error } = await supabase
     .from("bookings")
-    .select("id, created_at, scheduled_start_at, booking_date, cancelled, owner_deposit_paid, borrower_paid")
+    .select("id, borrower_id, created_at, scheduled_start_at, booking_date, cancelled, owner_deposit_paid, borrower_paid")
     .eq("cancelled", false)
     .eq("borrower_paid", true)
     .eq("owner_deposit_paid", false)
@@ -144,23 +245,38 @@ if (incoming !== ADMIN_KEY) {
   let expiredSucceeded = 0;
 
   for (const b of expired) {
-    expiredProcessed++;
-    const r = await callCancelBooking({
-      supabaseUrl: SUPABASE_URL,
-      serviceRoleKey: SERVICE_ROLE_KEY,
-      bookingId: b.id,
-    });
+  expiredProcessed++;
+  const r = await callCancelBooking({
+    supabaseUrl: SUPABASE_URL,
+    serviceRoleKey: SERVICE_ROLE_KEY,
+    bookingId: b.id,
+  });
 
-    if (r.ok) expiredSucceeded++;
-    results.push({
-      booking_id: b.id,
-      acceptance_hours: b.hours,
-      deadlineMs: b.deadlineMs,
-      call_ok: r.ok,
-      http_status: r.status,
-      payload: r.payload,
-    });
+  if (r.ok) {
+    expiredSucceeded++;
+
+    try {
+      await sendBorrowerExpiredEmailIfNeeded({
+        supabase,
+        bookingId: b.id,
+        borrowerId: b.borrower_id ?? null,
+        scheduledIso: b.scheduledIso ?? null,
+        acceptanceHours: b.hours,
+      });
+    } catch (emailError) {
+      console.error("❌ borrower expiry email failed:", emailError);
+    }
   }
+
+  results.push({
+    booking_id: b.id,
+    acceptance_hours: b.hours,
+    deadlineMs: b.deadlineMs,
+    call_ok: r.ok,
+    http_status: r.status,
+    payload: r.payload,
+  });
+}
 
   return json(200, {
     ok: true,

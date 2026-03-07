@@ -71,6 +71,27 @@ export default function Browse() {
   const [city, setCity] = useState("All");
   const [activeOnly, setActiveOnly] = useState(true);
 
+  // Allow deep links from the home page like /browse?province=AB&city=Calgary
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const p = (params.get("province") || "").toUpperCase();
+      const c = params.get("city") || "";
+
+      if (p) {
+        const valid = PROVINCES.some((x) => x.code === p);
+        if (valid) setProvince(p as ProvinceFilter);
+      }
+
+      if (c) {
+        setCity(c);
+      }
+    } catch {}
+    // run once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
   useEffect(() => {
     let cancelled = false;
 
