@@ -100,10 +100,30 @@ async function verifyStripeSignatureOrThrow(args: {
 
   throw new Error("Stripe signature verification failed");
 }
+function scheduledIsoFor(booking: { booking_date?: string | null }) {
+  return booking.booking_date ?? null;
+}
+
+function acceptanceHoursForBooking(booking: { booking_date?: string | null; created_at?: string | null }) {
+  const createdIso = booking?.created_at ?? null;
+  const scheduledIso = scheduledIsoFor(booking);
+  if (!createdIso || !scheduledIso) return 8;
+
+  const created = new Date(createdIso);
+  const scheduled = new Date(scheduledIso);
+  if (isNaN(created.getTime()) || isNaN(scheduled.getTime())) return 8;
+
+  const hoursBetween = (scheduled.getTime() - created.getTime()) / (1000 * 60 * 60);
+
+  if (hoursBetween < 24) return 2;
+  if (hoursBetween <= 72) return 4;
+  return 8;
+}
+
 async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, owner_id, borrower_id, booking_date")
+    .select("id, owner_id, borrower_id, booking_date, created_at")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -157,6 +177,8 @@ async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
       })
     : "your upcoming road test";
 
+  const acceptanceHours = acceptanceHoursForBooking(booking);
+
   const registryText = "the selected registry";
 
   await sendEmail({
@@ -175,6 +197,9 @@ async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
 
         <p>Please log in to review the request and decide whether to accept.</p>
 
+        <p>
+           <strong>Acceptance window:</strong> You now have ${acceptanceHours} hours to accept or decline this request before it expires automatically.
+        </p>
         <p>
           <a href="https://borrowmybike.ca/owner-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             Review request
@@ -195,6 +220,7 @@ async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
     meta: {
       source: "stripe-webhook",
       booking_date: booking.booking_date ?? null,
+      acceptance_hours: acceptanceHours,
     },
   });
 }

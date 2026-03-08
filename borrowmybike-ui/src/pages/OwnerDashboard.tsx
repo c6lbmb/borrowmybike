@@ -303,13 +303,72 @@ export default function OwnerDashboard() {
 
   const ownerAcceptChecklist: ChecklistItem[] = useMemo(
     () => [
-      { id: "ready", label: <>My bike is <b>road-test ready</b> (lights, signals, brakes, tires).</> },
-      { id: "docs", label: <>I have <b>valid registration + insurance</b> available at the registry.</> },
-      { id: "timing", label: <>I understand I must be on time and check-in is limited to the allowed window.</> },
-      { id: "rules", label: <>I understand cancellation / fault consequences and that this is <b>road tests only</b> (not rentals).</> },
-    ],
-    [],
-  );
+      {
+      id: "supervision",
+      label: (
+        <>
+          I understand my bike stays under <b>supervision</b>: I see it before and after the test,
+          and during the road test it is also in the examiner’s view.
+        </>
+      ),
+    },
+    {
+      id: "care",
+      label: (
+        <>
+          I understand road tests are typically handled <b>carefully</b> because the rider’s goal is
+          to earn their Class 6, not take risks or damage the bike.
+        </>
+      ),
+    },
+    {
+      id: "messaging",
+      label: (
+        <>
+          I will use <b>in-app messaging</b> before accepting to confirm timing, registry location,
+          and any expectations so both sides feel prepared.
+        </>
+      ),
+    },
+    {
+      id: "ready",
+      label: (
+        <>
+          I confirm the bike is <b>road-test ready</b>: lights, signals, brakes, tires, mirrors, and
+          no warning lights or obvious mechanical issues.
+        </>
+      ),
+    },
+    {
+      id: "docs",
+      label: (
+        <>
+          I will make sure <b>valid registration and insurance</b> are available and that there is
+          enough fuel for the registry trip, test, and return.
+        </>
+      ),
+    },
+    {
+      id: "possession",
+      label: (
+        <>
+          I understand I should arrive on time, keep track of my bike throughout the meetup, and
+          verify it is back in my possession after the test.
+        </>
+      ),
+    },
+    {
+      id: "deposit_rules",
+      label: (
+        <>
+          I understand accepting means paying my <b>mentor deposit</b> now unless credit covers it,
+          and platform cancellation, no-show, and fault rules apply once I accept.
+        </>
+      ),
+    },
+  ],
+  [],
+);
 
   async function load() {
     if (!me) return;
@@ -720,35 +779,43 @@ This will flag the booking for review and rebooking. Continue?`,
 return (
     <div style={{ padding: "2rem" }}>
       <ChecklistGateModal
-        open={gateOpen}
-        title="Before you accept…"
-        intro={
-          <>
-            You’re agreeing your bike is road-test ready and you understand the cancellation / fault rules.
-            You’ll place the <b>$150 mentor deposit</b> next (credit may apply).
-          </>
-        }
-        requiredItems={ownerAcceptChecklist}
-        footerNote={
-          <>
-            If you accept and don’t show up, or your bike isn’t road-worthy at the registry, your deposit may be used to compensate the test-taker.
-          </>
-        }
-        confirmText="I agree — continue to deposit"
-        cancelText="Not now"
-        onCancel={() => {
-          setGateOpen(false);
-          setGateBooking(null);
-        }}
-        onConfirm={() => {
-          const b = gateBooking;
-          setGateOpen(false);
-          setGateBooking(null);
-          if (!b) return;
-
-          void doAcceptWithDeposit(b);
-        }}
-      />
+  open={gateOpen}
+  title="Before you accept…"
+  intro={
+    <>
+      <div style={{ fontWeight: 800, marginBottom: 6 }}>
+        Before you accept, please confirm the points below.
+      </div>
+      <div>
+        Your bike stays in a controlled road-test setting. You see it before and after the test,
+        and during the test it is also in the examiner’s view. Road tests are handled carefully
+        because the rider’s goal is to earn their Class 6, not take risks.
+      </div>
+      <div style={{ marginTop: 8 }}>
+        In-app messaging is there to help you coordinate timing, meeting details, and expectations
+        before you accept.
+      </div>
+    </>
+  }
+  requiredItems={ownerAcceptChecklist}
+  footerNote={
+    <>
+      Accepting means you are confirming that you understand the request, the timeline, and your
+      responsibilities as the mentor. The same checklist is shown here so nothing is easy to miss.
+    </>
+  }
+  confirmText="I agree — continue to deposit"
+  cancelText="Go back"
+  onCancel={() => {
+    setGateOpen(false);
+  }}
+  onConfirm={() => {
+    if (gateBooking) {
+      setGateOpen(false);
+      void doAcceptWithDeposit(gateBooking);
+    }
+  }}
+/>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
@@ -856,7 +923,7 @@ return (
       {/* Requests */}
       <div style={{ marginTop: 16, ...cardShell }}>
         <div style={{ fontWeight: 1000, fontSize: 18 }}>Requests</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>Requests waiting for your decision.</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>Requests waiting for your decision. Review the checklist below before you accept.</div>
 
         {pending.length === 0 ? (
           <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No pending requests.</div>
@@ -901,7 +968,7 @@ return (
                 })()}
 
                 <div style={{ marginTop: 10, color: "#64748b", fontWeight: 750, fontSize: 13 }}>
-                  Accept = pay deposit (unless credit covers it).
+                  Accepting this request means paying the mentor deposit now (unless your credit covers it).
                 </div>
 
                 {(() => {
@@ -996,9 +1063,35 @@ return (
                       opacity: busyId === b.id ? 0.7 : 1,
                     }}
                   >
-                    {busyId === b.id ? "…" : cancelButtonLabelFor(b)}
+                    {busyId === b.id ? "…" : "Decline request"}
                   </button>
                 </div>
+
+                <details
+                  style={{
+                    marginTop: 12,
+                    border: "1px solid #dbeafe",
+                    background: "#f8fbff",
+                    borderRadius: 14,
+                    padding: 12,
+                  }}
+                >
+                  <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                    <div style={{ fontWeight: 950, color: "#0f172a" }}>Before you accept</div>
+                    <div style={{ marginTop: 6, color: "#475569", fontWeight: 750, fontSize: 13 }}>
+                      The same checklist will appear when you click <b>Accept</b>.
+                    </div>
+                  </summary>
+                  <ul style={{ margin: "12px 0 0", paddingLeft: 18, color: "#334155", lineHeight: 1.6 }}>
+                    <li>Your bike stays under supervision: your own eyes before and after the test, and the examiner’s eyes during the road test.</li>
+                    <li>Road tests are typically handled carefully because the rider wants to earn their Class 6, not take risks or damage the bike.</li>
+                    <li>Use in-app messaging before accepting to confirm timing, registry location, and any expectations so both sides feel prepared.</li>
+                    <li>Confirm the bike is road-test ready: lights, signals, brakes, tires, mirrors, and no warning lights or obvious mechanical issues.</li>
+                    <li>Make sure valid registration and insurance are available and that there is enough fuel for the registry trip, test, and return.</li>
+                    <li>You should be able to arrive on time, keep track of your bike throughout the meetup, and verify it is back in your possession after the test.</li>
+                    <li>Accepting means paying your mentor deposit now unless credit covers it, and platform cancellation, no-show, and fault rules apply once you accept.</li>
+                  </ul>
+                </details>
               </div>
             ))}
           </div>

@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+import { sendEmail } from "../_shared/sendEmail.ts";
+import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -82,8 +84,130 @@ async function consumeUpToCreditRow(args: { creditRow: any; booking_id: string; 
 
   return { usedAmount, creditId: creditRow.id };
 }
+function scheduledIsoFor(booking: { booking_date?: string | null }) {
+  return booking.booking_date ?? null;
+}
 
-serve(async (req) => {
+function acceptanceHoursForBooking(booking: { booking_date?: string | null; created_at?: string | null }) {
+  const createdIso = booking?.created_at ?? null;
+  const scheduledIso = scheduledIsoFor(booking);
+  if (!createdIso || !scheduledIso) return 8;
+
+  const created = new Date(createdIso);
+  const scheduled = new Date(scheduledIso);
+  if (isNaN(created.getTime()) || isNaN(scheduled.getTime())) return 8;
+
+  const hoursBetween = (scheduled.getTime() - created.getTime()) / (1000 * 60 * 60);
+
+  if (hoursBetween < 24) return 2;
+  if (hoursBetween <= 72) return 4;
+  return 8;
+}
+
+async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, owner_id, borrower_id, booking_date, created_at")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) {
+    console.error("❌ booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  if (!booking?.owner_id) {
+    console.warn("⚠️ booking missing owner_id, skipping email", { bookingId });
+    return;
+  }
+
+  const { data: owner, error: ownerError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", booking.owner_id)
+    .maybeSingle();
+
+  if (ownerError) {
+    console.error("❌ owner lookup failed:", ownerError);
+    throw ownerError;
+  }
+
+  if (!owner?.email) {
+    console.warn("⚠️ owner missing email, skipping email", { bookingId, ownerId: booking.owner_id });
+    return;
+  }
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: owner.id,
+    notificationType: "request_created_owner",
+  });
+
+  if (alreadySent) {
+    console.log("ℹ️ owner request email already sent, skipping", { bookingId, ownerId: owner.id });
+    return;
+  }
+
+  const ownerName =
+    owner.first_name?.trim() ||
+    owner.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = booking.booking_date
+    ? new Date(booking.booking_date).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "your upcoming road test";
+
+  const acceptanceHours = acceptanceHoursForBooking(booking);
+
+  await sendEmail({
+    to: owner.email,
+    subject: "New BorrowMyBike request",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${ownerName},</p>
+
+        <p>You have a new BorrowMyBike road-test request.</p>
+
+        <p>
+          <strong>Test time:</strong> ${bookingDateText}
+        </p>
+
+        <p>Please log in to review the request and decide whether to accept.</p>
+
+        <p>
+          <strong>Acceptance window:</strong> You now have ${acceptanceHours} hours to accept or decline this request before it expires automatically.
+        </p>
+
+        <p>
+          <a href="https://borrowmybike.ca/owner-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            Review request
+          </a>
+        </p>
+
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: owner.id,
+    emailTo: owner.email,
+    notificationType: "request_created_owner",
+    meta: {
+      source: "create-booking-and-payment",
+      booking_date: booking.booking_date ?? null,
+      acceptance_hours: acceptanceHours,
+    },
+  });
+}
+
+serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
@@ -185,23 +309,29 @@ serve(async (req) => {
         }]);
       }
 
-      if (creditApplied >= BORROWER_FEE) {
-        await supabase
-          .from("bookings")
-          .update({ borrower_paid: true, status: "confirmed", payment_expires_at: null })
-          .eq("id", bookingId);
+     if (creditApplied >= BORROWER_FEE) {
+  await supabase
+    .from("bookings")
+    .update({ borrower_paid: true, status: "confirmed", payment_expires_at: null })
+    .eq("id", bookingId);
 
-        return json(200, {
-          booking_id: bookingId,
-          used_credit: true,
-          credit_applied: creditApplied,
-          amount_due: 0,
-          checkout_url: null,
-          stripe_checkout_session_id: null,
-          scheduled_start_at: effectiveScheduledStart,
-          message: "Booking created and paid with credit.",
-        });
-      }
+  try {
+    await sendOwnerRequestEmailIfNeeded(supabase, bookingId);
+  } catch (emailError) {
+    console.error("❌ owner request email failed (credit-covered path):", emailError);
+  }
+
+  return json(200, {
+    booking_id: bookingId,
+    used_credit: true,
+    credit_applied: creditApplied,
+    amount_due: 0,
+    checkout_url: null,
+    stripe_checkout_session_id: null,
+    scheduled_start_at: effectiveScheduledStart,
+    message: "Booking created and paid with credit.",
+  });
+}
     }
   } catch {
     creditApplied = 0; // safe fallback
