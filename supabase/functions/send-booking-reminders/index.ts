@@ -2,9 +2,10 @@ import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2?target=deno";
 import { sendEmail } from "../_shared/sendEmail.ts";
 import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_URL = Deno.env.get("MY_SUPABASE_URL")!;
+const SERVICE_ROLE_KEY = Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY")!;
 const BOOKING_REMINDER_SECRET = Deno.env.get("BOOKING_REMINDER_SECRET")!;
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -15,14 +16,6 @@ function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
-  });
-}
-
-function formatBookingTime(iso?: string | null) {
-  if (!iso) return "your upcoming road test";
-  return new Date(iso).toLocaleString("en-CA", {
-    dateStyle: "medium",
-    timeStyle: "short",
   });
 }
 
@@ -51,8 +44,12 @@ async function sendReminderIfNeeded(opts: {
 
   const notificationType =
     hoursBefore === 24
-      ? `${userRole}_24h_reminder_notified`
-      : `${userRole}_4h_reminder_notified`;
+      ? userRole === "owner"
+        ? "booking_reminder_24h_sent_to_owner"
+        : "booking_reminder_24h_sent_to_borrower"
+      : userRole === "owner"
+        ? "booking_reminder_4h_sent_to_owner"
+        : "booking_reminder_4h_sent_to_borrower";
 
   const alreadySent = await hasNotificationBeenSent({
     supabase,
@@ -70,7 +67,7 @@ async function sendReminderIfNeeded(opts: {
     fullName?.trim() ||
     "there";
 
-  const bookingDateText = formatBookingTime(scheduledIso);
+  const bookingDateText = formatBookingTime(scheduledIso, "AB");
 
   const roleText = userRole === "owner" ? "mentor" : "road test";
   const subject =
@@ -80,13 +77,13 @@ async function sendReminderIfNeeded(opts: {
 
   const ctaHref =
     userRole === "owner"
-      ? "https://borrowmybike.ca/owner-dashboard"
-      : "https://borrowmybike.ca/borrower-dashboard";
+      ? "https://borrowmybike.ca/dashboard"
+      : "https://borrowmybike.ca/dashboard";
 
   const ctaLabel =
     userRole === "owner"
-      ? "View owner dashboard"
-      : "View booking";
+      ? "View dashboard"
+      : "View dashboard";
 
   await sendEmail({
     to: userEmail,

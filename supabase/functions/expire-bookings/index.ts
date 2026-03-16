@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { sendEmail } from "../_shared/sendEmail.ts";
 import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -112,7 +113,7 @@ async function sendBorrowerExpiredEmailIfNeeded(opts: {
     supabase,
     bookingId,
     userId: borrower.id,
-    notificationType: "request_expired_borrower_notified",
+    notificationType: "booking_request_expired_sent_to_borrower",
   });
 
   if (alreadySent) {
@@ -128,12 +129,7 @@ async function sendBorrowerExpiredEmailIfNeeded(opts: {
     borrower.full_name?.trim() ||
     "there";
 
-  const bookingDateText = scheduledIso
-    ? new Date(scheduledIso).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your requested road test";
+  const bookingDateText = formatBookingTime(scheduledIso, "AB");
 
   await sendEmail({
     to: borrower.email,
@@ -151,7 +147,7 @@ async function sendBorrowerExpiredEmailIfNeeded(opts: {
         <p>Any rebooking credit or outcome has been applied under the platform rules.</p>
 
         <p>
-          <a href="https://borrowmybike.ca/browse-bikes" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+          <a href="https://borrowmybike.ca/browse" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             Find another bike
           </a>
         </p>
@@ -166,7 +162,7 @@ async function sendBorrowerExpiredEmailIfNeeded(opts: {
     bookingId,
     userId: borrower.id,
     emailTo: borrower.email,
-    notificationType: "request_expired_borrower_notified",
+    notificationType: "booking_request_expired_sent_to_borrower",
     meta: {
       source: "expire-bookings",
       booking_date: scheduledIso ?? null,
@@ -193,11 +189,8 @@ if (incoming !== ADMIN_KEY) {
   return json(401, { error: "Invalid admin key", version });
 }
 
-  const SUPABASE_URL = Deno.env.get("MY_SUPABASE_URL") ?? Deno.env.get("SUPABASE_URL") ?? "";
-  const SERVICE_ROLE_KEY =
-    Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY") ??
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-    "";
+  const SUPABASE_URL = Deno.env.get("MY_SUPABASE_URL") ?? "";
+  const SERVICE_ROLE_KEY = Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
     return json(500, { error: "Missing env MY_SUPABASE_URL or MY_SUPABASE_SERVICE_ROLE_KEY", version });

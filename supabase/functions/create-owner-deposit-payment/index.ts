@@ -4,6 +4,7 @@ import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2?target=deno";
 import { sendEmail } from "../_shared/sendEmail.ts";
 import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,7 +67,7 @@ function scheduledIsoFor(booking: any): string | null {
 async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, owner_id, borrower_id, booking_date")
+    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -103,7 +104,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
     supabase,
     bookingId: booking.id,
     userId: borrower.id,
-    notificationType: "accepted_borrower",
+    notificationType: "booking_request_accepted_sent_to_borrower",
   });
 
   if (alreadySent) {
@@ -119,12 +120,19 @@ async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
     borrower.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your upcoming road test";
+  const bookingDateText = formatBookingTime(
+  booking.scheduled_start_at ?? booking.booking_date,
+  "AB"
+);
+
+console.log("accepted email debug", {
+  booking_date: booking.booking_date,
+  scheduled_start_at: booking.scheduled_start_at,
+  formatted: formatBookingTime(
+    booking.scheduled_start_at ?? booking.booking_date,
+    "AB"
+  ),
+});
 
   await sendEmail({
     to: borrower.email,
@@ -142,7 +150,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
         <p>Please review your booking details and prepare for your road test.</p>
 
         <p>
-          <a href="https://borrowmybike.ca/borrower-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             View booking
           </a>
         </p>
@@ -157,7 +165,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
     bookingId: booking.id,
     userId: borrower.id,
     emailTo: borrower.email,
-    notificationType: "accepted_borrower",
+    notificationType: "booking_request_accepted_sent_to_borrower",
     meta: {
       source: "create-owner-deposit-payment",
       booking_date: booking.booking_date ?? null,
@@ -391,8 +399,8 @@ return json(200, {
   // Otherwise charge remainder via Stripe checkout
   const stripe = new Stripe(stripeSecretKey, { apiVersion: "2023-10-16" });
 
-  const successUrl = `${frontendBaseUrl}/owner?deposit_success=1&booking_id=${booking_id}`;
-  const cancelUrl = `${frontendBaseUrl}/owner?deposit_cancelled=1&booking_id=${booking_id}`;
+  const successUrl = `${frontendBaseUrl}/dashboard/mentor?deposit_success=1&booking_id=${booking_id}`;
+  const cancelUrl = `${frontendBaseUrl}/dashboard/mentor?deposit_cancelled=1&booking_id=${booking_id}`;
 
 const meta = {
   booking_id,

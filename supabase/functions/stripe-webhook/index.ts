@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 import { sendEmail } from "../_shared/sendEmail.ts";
 import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
 
 const supabaseUrl = Deno.env.get("MY_SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY")!;
@@ -100,8 +101,11 @@ async function verifyStripeSignatureOrThrow(args: {
 
   throw new Error("Stripe signature verification failed");
 }
-function scheduledIsoFor(booking: { booking_date?: string | null }) {
-  return booking.booking_date ?? null;
+function scheduledIsoFor(booking: {
+  scheduled_start_at?: string | null;
+  booking_date?: string | null;
+}) {
+  return booking.scheduled_start_at ?? booking.booking_date ?? null;
 }
 
 function acceptanceHoursForBooking(booking: { booking_date?: string | null; created_at?: string | null }) {
@@ -123,7 +127,7 @@ function acceptanceHoursForBooking(booking: { booking_date?: string | null; crea
 async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, owner_id, borrower_id, booking_date, created_at")
+    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at, created_at")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -170,12 +174,7 @@ async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
     owner.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your upcoming road test";
+ const bookingDateText = formatBookingTime(scheduledIsoFor(booking), "AB");
 
   const acceptanceHours = acceptanceHoursForBooking(booking);
 
@@ -201,7 +200,7 @@ async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
            <strong>Acceptance window:</strong> You now have ${acceptanceHours} hours to accept or decline this request before it expires automatically.
         </p>
         <p>
-          <a href="https://borrowmybike.ca/owner-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             Review request
           </a>
         </p>
@@ -227,7 +226,7 @@ async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
 async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, owner_id, borrower_id, booking_date")
+    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -280,12 +279,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
     borrower.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your upcoming road test";
+  const bookingDateText = formatBookingTime(scheduledIsoFor(booking), "AB");
 
   await sendEmail({
     to: borrower.email,
@@ -303,7 +297,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
         <p>Please review your booking details and prepare for your road test.</p>
 
         <p>
-          <a href="https://borrowmybike.ca/borrower-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             View booking
           </a>
         </p>

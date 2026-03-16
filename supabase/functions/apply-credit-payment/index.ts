@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { sendEmail } from "../_shared/sendEmail.ts";
 import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,8 +22,11 @@ function isAlreadyExistsError(msg: string | null | undefined) {
   // Postgres unique violation
   return m.includes("duplicate key") || m.includes("already exists") || m.includes("23505");
 }
-function scheduledIsoFor(booking: { booking_date?: string | null }) {
-  return booking.booking_date ?? null;
+function scheduledIsoFor(booking: {
+  scheduled_start_at?: string | null;
+  booking_date?: string | null;
+}) {
+  return booking.scheduled_start_at ?? booking.booking_date ?? null;
 }
 
 function acceptanceHoursForBooking(booking: { booking_date?: string | null; created_at?: string | null }) {
@@ -78,7 +82,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
     supabase,
     bookingId: booking.id,
     userId: owner.id,
-    notificationType: "request_created_owner",
+    notificationType: "booking_request_sent_to_owner",
   });
 
   if (alreadySent) {
@@ -91,12 +95,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
     owner.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your upcoming road test";
+   const bookingDateText = formatBookingTime(booking.booking_date, "AB");
 
   const acceptanceHours = acceptanceHoursForBooking(booking);
 
@@ -120,7 +119,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
         </p>
 
         <p>
-          <a href="https://borrowmybike.ca/owner-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             Review request
           </a>
         </p>
@@ -135,7 +134,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
     bookingId: booking.id,
     userId: owner.id,
     emailTo: owner.email,
-    notificationType: "request_created_owner",
+    notificationType: "booking_request_sent_to_owner",
     meta: {
       source: "apply-credit-payment",
       booking_date: booking.booking_date ?? null,
@@ -147,7 +146,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
 async function sendBorrowerAcceptedEmailIfNeeded(supabase: any, bookingId: string) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, owner_id, borrower_id, booking_date")
+    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -184,7 +183,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(supabase: any, bookingId: strin
     supabase,
     bookingId: booking.id,
     userId: borrower.id,
-    notificationType: "accepted_borrower",
+    notificationType: "booking_request_accepted_sent_to_borrower",
   });
 
   if (alreadySent) {
@@ -200,12 +199,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(supabase: any, bookingId: strin
     borrower.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your upcoming road test";
+  const bookingDateText = formatBookingTime(scheduledIsoFor(booking), "AB");
 
   await sendEmail({
     to: borrower.email,
@@ -223,7 +217,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(supabase: any, bookingId: strin
         <p>Please review your booking details and prepare for your road test.</p>
 
         <p>
-          <a href="https://borrowmybike.ca/borrower-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             View booking
           </a>
         </p>
@@ -238,7 +232,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(supabase: any, bookingId: strin
     bookingId: booking.id,
     userId: borrower.id,
     emailTo: borrower.email,
-    notificationType: "accepted_borrower",
+    notificationType: "booking_request_accepted_sent_to_borrower",
     meta: {
       source: "apply-credit-payment",
       booking_date: booking.booking_date ?? null,
@@ -269,10 +263,10 @@ serve(async (req: Request) => {
   const CURRENCY = "CAD";
   const payment_type = actor === "borrower" ? "borrower_credit" : "owner_credit";
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseUrl = Deno.env.get("MY_SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("MY_SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !serviceRoleKey) {
-    return json(500, { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
+    return json(500, { error: "Missing MY_SUPABASE_URL or MY_SUPABASE_SERVICE_ROLE_KEY" });
   }
 
   const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.45.4");

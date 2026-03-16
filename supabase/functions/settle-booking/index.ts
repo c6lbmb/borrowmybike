@@ -2,6 +2,9 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
+import { sendEmail } from "../_shared/sendEmail.ts";
+import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -398,6 +401,88 @@ async function returnOwnerDeposit(args: {
   }
 }
 
+
+async function loadEmailContext(args: {
+  borrower_id: string;
+  owner_id: string;
+  bike_id?: string | null;
+}) {
+  const { borrower_id, owner_id, bike_id } = args;
+
+  const { data: borrower } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", borrower_id)
+    .maybeSingle();
+
+  const { data: owner } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", owner_id)
+    .maybeSingle();
+
+  let bike: any = null;
+  if (bike_id) {
+    const { data } = await supabase
+      .from("bikes")
+      .select("id, title, make, model, year, province")
+      .eq("id", bike_id)
+      .maybeSingle();
+    bike = data ?? null;
+  }
+
+  return { borrower, owner, bike };
+}
+
+function displayName(user: any) {
+  return user?.first_name?.trim() || user?.full_name?.trim() || "there";
+}
+
+function bikeLabel(bike: any) {
+  if (!bike) return "your booking";
+  return (
+    bike.title?.trim() ||
+    [bike.year, bike.make, bike.model].filter(Boolean).join(" ") ||
+    "your booking"
+  );
+}
+
+async function sendSettlementEmailIfNeeded(args: {
+  bookingId: string;
+  userId: string | null;
+  emailTo: string | null;
+  notificationType: string;
+  subject: string;
+  html: string;
+  meta?: Record<string, unknown>;
+}) {
+  const { bookingId, userId, emailTo, notificationType, subject, html, meta = {} } = args;
+
+  if (!userId || !emailTo) return { skipped: true, reason: "missing-user-or-email" };
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId,
+    userId,
+    notificationType,
+  });
+
+  if (alreadySent) return { skipped: true, reason: "already-sent" };
+
+  await sendEmail({ to: emailTo, subject, html });
+
+  await logNotificationSent({
+    supabase,
+    bookingId,
+    userId,
+    emailTo,
+    notificationType,
+    meta,
+  });
+
+  return { skipped: false };
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
@@ -470,6 +555,21 @@ serve(async (req: Request) => {
       _auto_from_flags: true,
     };
   }
+
+  const { borrower, owner, bike } = await loadEmailContext({
+    borrower_id: booking.borrower_id,
+    owner_id: booking.owner_id,
+    bike_id: booking.bike_id,
+  });
+
+  const bookingDateText = formatBookingTime(
+    booking.scheduled_start_at || booking.booking_date,
+    bike?.province ?? "AB",
+  );
+
+  const borrowerName = displayName(borrower);
+  const ownerName = displayName(owner);
+  const bikeText = bikeLabel(bike);
 
 
   // Basic guards: must have both payments and completed flag (happy path uses completed)
@@ -576,6 +676,47 @@ serve(async (req: Request) => {
         note: `borrower_no_show; platformIncome=${platformIncome}; ownerComp=${compensation}`,
       });
 
+      await sendSettlementEmailIfNeeded({
+        bookingId: booking_id,
+        userId: borrower?.id ?? null,
+        emailTo: borrower?.email ?? null,
+        notificationType: "settled_borrower_no_show_borrower",
+        subject: "Your BorrowMyBike booking was settled as a no-show",
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+            <p>Hi ${borrowerName},</p>
+            <p>Your booking was settled as a borrower no-show under the platform rules.</p>
+            <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+            <p>Your booking fee was forfeited as part of this outcome.</p>
+            <p>If you believe this settlement was made in error, please reply to this email or contact support@borrowmybike.ca to dispute it.</p>
+          </div>
+        `,
+        meta: { source: "settle-booking", scenario: "borrower_no_show", role: "borrower" },
+      });
+
+      await sendSettlementEmailIfNeeded({
+        bookingId: booking_id,
+        userId: owner?.id ?? null,
+        emailTo: owner?.email ?? null,
+        notificationType: "settled_borrower_no_show_owner",
+        subject: "Your BorrowMyBike compensation has been recorded",
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+            <p>Hi ${ownerName},</p>
+            <p>This booking was settled as a borrower no-show.</p>
+            <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+            <p>Your compensation payout has been recorded and is being processed.</p>
+            <p>Thank you for showing up prepared. We’d love to have you accept more bookings.</p>
+            <p>
+              <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+                View dashboard
+              </a>
+            </p>
+          </div>
+        `,
+        meta: { source: "settle-booking", scenario: "borrower_no_show", role: "owner" },
+      });
+
       return json(200, {
         ok: true,
         booking_id,
@@ -608,7 +749,8 @@ serve(async (req: Request) => {
         booking_id,
         reason: "Owner no-show: booking fee returned as credit",
       });
-await supabase.from("bookings").update({
+
+      await supabase.from("bookings").update({
         settled: true,
         settled_at: now.toISOString(),
         settlement_outcome: "owner_no_show",
@@ -627,6 +769,47 @@ await supabase.from("bookings").update({
         actor_user_id: booking.borrower_id,
         action: "no_show_claim_borrower_vs_owner",
         note: `owner_no_show; platformIncome=${platformIncome}; borrowerComp=${compensation}; bookingFeeReturn=${borrowerRefundResult.via}`,
+      });
+
+      await sendSettlementEmailIfNeeded({
+        bookingId: booking_id,
+        userId: owner?.id ?? null,
+        emailTo: owner?.email ?? null,
+        notificationType: "settled_owner_no_show_owner",
+        subject: "Your BorrowMyBike booking was settled as a no-show",
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+            <p>Hi ${ownerName},</p>
+            <p>Your booking was settled as an owner no-show under the platform rules.</p>
+            <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+            <p>The applicable penalty has been recorded under the platform settlement rules.</p>
+            <p>If you believe this settlement was made in error, please reply to this email or contact support@borrowmybike.ca to dispute it.</p>
+          </div>
+        `,
+        meta: { source: "settle-booking", scenario: "owner_no_show", role: "owner" },
+      });
+
+      await sendSettlementEmailIfNeeded({
+        bookingId: booking_id,
+        userId: borrower?.id ?? null,
+        emailTo: borrower?.email ?? null,
+        notificationType: "settled_owner_no_show_borrower",
+        subject: "You’ve been compensated for your BorrowMyBike booking",
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+            <p>Hi ${borrowerName},</p>
+            <p>Your booking was settled as an owner no-show.</p>
+            <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+            <p>You have been issued a $150 rebook credit for your booking fee, and your $100 compensation payout has been recorded and is being processed.</p>
+            <p>
+              <a href="https://borrowmybike.ca/browse" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+                Find another bike
+              </a>
+            </p>
+            <p>If you have any questions, contact support@borrowmybike.ca.</p>
+          </div>
+        `,
+        meta: { source: "settle-booking", scenario: "owner_no_show", role: "borrower" },
       });
 
       return json(200, {
@@ -680,6 +863,53 @@ await supabase.from("bookings").update({
 
       if (upErr) throw upErr;
 
+      await sendSettlementEmailIfNeeded({
+        bookingId: booking_id,
+        userId: borrower?.id ?? null,
+        emailTo: borrower?.email ?? null,
+        notificationType: "settled_happy_path_borrower",
+        subject: "Thanks for using BorrowMyBike",
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+            <p>Hi ${borrowerName},</p>
+            <p>Thank you for using BorrowMyBike for your road test booking.</p>
+            <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+            <p>If you passed and now have, or plan to have, a road-test-ready motorcycle, consider joining BorrowMyBike as a mentor to help others and offset some of the cost of your bike.</p>
+            <p>
+              <a href="https://borrowmybike.ca/become-a-mentor" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+                Become a mentor
+              </a>
+            </p>
+            <p>If you have any questions, contact support@borrowmybike.ca.</p>
+          </div>
+        `,
+        meta: { source: "settle-booking", scenario: "happy_path", role: "borrower" },
+      });
+
+      await sendSettlementEmailIfNeeded({
+        bookingId: booking_id,
+        userId: owner?.id ?? null,
+        emailTo: owner?.email ?? null,
+        notificationType: "settled_happy_path_owner",
+        subject: "Your BorrowMyBike payout has been recorded",
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+            <p>Hi ${ownerName},</p>
+            <p>Thank you for completing your BorrowMyBike booking.</p>
+            <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+            <p>Your payout has been recorded and is being processed according to the platform payout method currently on file.</p>
+            <p>We’d love to have you accept another booking when your bike is available.</p>
+            <p>
+              <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+                View dashboard
+              </a>
+            </p>
+            <p>If you have any questions, contact support@borrowmybike.ca.</p>
+          </div>
+        `,
+        meta: { source: "settle-booking", scenario: "happy_path", role: "owner" },
+      });
+
       return json(200, {
         ok: true,
         booking_id,
@@ -690,38 +920,49 @@ await supabase.from("bookings").update({
       });
     }
 
-    // Owner fault: refund borrower booking fee + keep platform income as cancel fee (you already modeled this)
+    // Owner fault: borrower gets booking fee back (refund or credit fallback), owner outcome recorded.
     if (isOwnerFault) {
       const borrowerPI = booking.stripe_payment_intent_id;
+      let borrowerFeeReturn: any = { performed: false, via: null as string | null };
+
       if (!borrowerPI || !stripeSecretKey) {
-        // If we cannot refund borrower via Stripe, we issue credit
-        await ensureCreditAvailable({
+        // If we cannot refund borrower via Stripe, issue platform credit instead.
+        const borrowerCredit = await ensureCreditAvailable({
           user_id: booking.borrower_id,
           credit_type: "BORROWER_REBOOK_CREDIT",
           amount: BOOKING_FEE_AMOUNT,
           booking_id,
           reason: "Owner fault: borrower rebook credit issued (Stripe refund unavailable)",
         });
+        borrowerFeeReturn = {
+          performed: true,
+          via: "credit",
+          credit_id: borrowerCredit.id,
+        };
       } else {
         // Refund borrower fee (idempotent)
-        await stripeRefundPartial(
+        const refund = await stripeRefundPartial(
           stripeSecretKey,
           borrowerPI,
           cents(BOOKING_FEE_AMOUNT),
           `refund_owner_fault_${booking_id}`,
         );
+        borrowerFeeReturn = {
+          performed: true,
+          via: "stripe_refund",
+          refund_id: refund.id,
+          refund_status: refund.status ?? null,
+          refunded_amount_cents: refund.amount ?? cents(BOOKING_FEE_AMOUNT),
+        };
       }
 
-      // Pay borrower compensation? (your business rule may differ; keep your current logic)
-      // Ensure platform income recorded
-      await ensurePlatformIncomePaid({
+      const platformIncome = await ensurePlatformIncomePaid({
         booking_id,
         amount: PLATFORM_INCOME_OWNER_FAULT,
         borrower_id: booking.borrower_id,
         owner_id: booking.owner_id,
       });
 
-      // Return/hold owner deposit as credit by default (unless explicitly refund)
       const ownerDepositReturn = await returnOwnerDeposit({
         booking_id,
         owner_id: booking.owner_id,
@@ -740,10 +981,61 @@ await supabase.from("bookings").update({
 
       if (upErr) throw upErr;
 
+      await logBookingAudit({
+        booking_id,
+        actor_role: "system",
+        actor_user_id: booking.owner_id,
+        action: "settle_owner_fault",
+        note: `owner_fault; borrowerFeeReturn=${borrowerFeeReturn.via ?? "none"}; platformIncome=${PLATFORM_INCOME_OWNER_FAULT}; ownerDepositReturn=${ownerDepositReturn.method ?? "credit"}`,
+      });
+
+      await sendSettlementEmailIfNeeded({
+        bookingId: booking_id,
+        userId: owner?.id ?? null,
+        emailTo: owner?.email ?? null,
+        notificationType: "settled_owner_fault_owner",
+        subject: "Your BorrowMyBike booking was settled as a mentor issue",
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+            <p>Hi ${ownerName},</p>
+            <p>Your booking was settled as an owner/mentor fault under the platform rules.</p>
+            <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+            <p>The applicable platform outcome has been recorded for this booking.</p>
+            <p>If you believe this settlement was made in error, please reply to this email or contact support@borrowmybike.ca to dispute it.</p>
+          </div>
+        `,
+        meta: { source: "settle-booking", scenario: "owner_fault", role: "owner" },
+      });
+
+      await sendSettlementEmailIfNeeded({
+        bookingId: booking_id,
+        userId: borrower?.id ?? null,
+        emailTo: borrower?.email ?? null,
+        notificationType: "settled_owner_fault_borrower",
+        subject: "Your BorrowMyBike booking was resolved",
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+            <p>Hi ${borrowerName},</p>
+            <p>Your booking was settled as an owner/mentor fault.</p>
+            <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+            <p>Your booking fee has been returned ${borrowerFeeReturn.via === "stripe_refund" ? "to your original payment method" : "as platform credit"}.</p>
+            <p>If you need another bike, you can browse and submit a new request when ready.</p>
+            <p>
+              <a href="https://borrowmybike.ca/browse" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+                Find another bike
+              </a>
+            </p>
+            <p>If you have any questions, contact support@borrowmybike.ca.</p>
+          </div>
+        `,
+        meta: { source: "settle-booking", scenario: "owner_fault", role: "borrower", fee_return_via: borrowerFeeReturn.via },
+      });
+
       return json(200, {
         ok: true,
         booking_id,
         scenario: "owner_fault",
+        borrower_fee_return: borrowerFeeReturn,
         owner_deposit_return: ownerDepositReturn,
         platform_income: platformIncome,
       });
@@ -782,7 +1074,7 @@ if (isBorrowerFault) {
       settled: true,
       settled_at: new Date().toISOString(),
       settlement_outcome: "borrower_fault",
-          settlement_version: SETTLEMENT_VERSION,
+      settlement_version: SETTLEMENT_VERSION,
       needs_review: false,
       review_reason: "borrower_fault",
       treat_as_owner_no_show: false,
@@ -798,6 +1090,47 @@ if (isBorrowerFault) {
     actor_user_id: booking.owner_id,
     action: "settle_borrower_fault",
     note: `borrower_fault; platformIncome=${platformIncome}; ownerPayoutDue=${compensation}; depositReturn=${ownerDepositReturn.method ?? ownerDepositReturn?.method ?? "credit"}`,
+  });
+
+  await sendSettlementEmailIfNeeded({
+    bookingId: booking_id,
+    userId: borrower?.id ?? null,
+    emailTo: borrower?.email ?? null,
+    notificationType: "settled_borrower_fault_borrower",
+    subject: "Your BorrowMyBike booking was settled under the fault rules",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${borrowerName},</p>
+        <p>Your booking was settled as a borrower/test-taker fault under the platform rules.</p>
+        <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+        <p>Your booking fee was forfeited as part of this outcome.</p>
+        <p>If you believe this settlement was made in error, please reply to this email or contact support@borrowmybike.ca to dispute it.</p>
+      </div>
+    `,
+    meta: { source: "settle-booking", scenario: "borrower_fault", role: "borrower" },
+  });
+
+  await sendSettlementEmailIfNeeded({
+    bookingId: booking_id,
+    userId: owner?.id ?? null,
+    emailTo: owner?.email ?? null,
+    notificationType: "settled_borrower_fault_owner",
+    subject: "Your BorrowMyBike payout has been recorded",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${ownerName},</p>
+        <p>This booking was settled as a borrower/test-taker fault.</p>
+        <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
+        <p>Your payout has been recorded and is being processed. Your deposit return has also been recorded according to the current platform policy.</p>
+        <p>Thank you for being prepared. We’d love to have you accept more bookings.</p>
+        <p>
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            View dashboard
+          </a>
+        </p>
+      </div>
+    `,
+    meta: { source: "settle-booking", scenario: "borrower_fault", role: "owner" },
   });
 
   return json(200, {
@@ -867,9 +1200,9 @@ if (isBorrowerFault) {
         ok: true,
         booking_id,
         scenario: "force_majeure",
-        borrower_fee_return: { performed: true, via: "credit", credit_id: borrowerCredit?.id ?? borrowerCredit?.credit_id ?? borrowerCredit?.id },
+        borrower_fee_return: { performed: true, via: "credit", credit_id: borrowerCredit?.id ?? null },
         owner_deposit_return: ownerDepositReturn,
-        platform_income: platformIncome,
+        platform_income: null,
       });
     }
 // Fallback: unsupported scenario

@@ -14,9 +14,13 @@ function json(status: number, body: unknown) {
   });
 }
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
-  if (req.method !== "POST") return json(405, { error: "Method not allowed" });
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+  if (req.method !== "POST") {
+    return json(405, { error: "Method not allowed" });
+  }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -33,22 +37,43 @@ serve(async (req) => {
 
   const service = createClient(supabaseUrl, serviceRoleKey);
 
-  let body: any;
+  let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
     return json(400, { error: "Invalid JSON body" });
   }
 
-  const ownerIds: string[] = Array.isArray(body?.owner_ids) ? body.owner_ids : [];
-  if (!ownerIds.length) return json(400, { error: "owner_ids must be a non-empty array" });
+  const owner_ids = Array.isArray(body.owner_ids)
+    ? body.owner_ids.map((x) => String(x ?? "").trim()).filter(Boolean)
+    : [];
+
+  if (!owner_ids.length) {
+    return json(400, { error: "owner_ids must be a non-empty array" });
+  }
 
   const { data, error } = await service
     .from("users")
-    .select("id, first_name, years_riding, travel_quadrants")
-    .in("id", ownerIds);
+    .select(`
+      id,
+      first_name,
+      years_riding,
+      travel_quadrants,
+      base_city,
+      service_cities,
+      available_weekdays,
+      available_weekends,
+      available_morning,
+      available_afternoon,
+      available_evening,
+      advance_notice_hours,
+      availability_notes
+    `)
+    .in("id", owner_ids);
 
-  if (error) return json(500, { error: "Failed to load owner summaries", details: error.message });
+  if (error) {
+    return json(500, { error: "Failed to load owner summaries", details: error.message });
+  }
 
   return json(200, { ok: true, owners: data ?? [] });
 });

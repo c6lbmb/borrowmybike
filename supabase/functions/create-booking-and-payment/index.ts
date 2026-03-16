@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 import { sendEmail } from "../_shared/sendEmail.ts";
 import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -141,7 +142,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
     supabase,
     bookingId: booking.id,
     userId: owner.id,
-    notificationType: "request_created_owner",
+    notificationType: "booking_request_sent_to_owner",
   });
 
   if (alreadySent) {
@@ -154,12 +155,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
     owner.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your upcoming road test";
+  const bookingDateText = formatBookingTime(booking.booking_date, "AB");
 
   const acceptanceHours = acceptanceHoursForBooking(booking);
 
@@ -183,7 +179,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
         </p>
 
         <p>
-          <a href="https://borrowmybike.ca/owner-dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             Review request
           </a>
         </p>
@@ -198,7 +194,7 @@ async function sendOwnerRequestEmailIfNeeded(supabase: any, bookingId: string) {
     bookingId: booking.id,
     userId: owner.id,
     emailTo: owner.email,
-    notificationType: "request_created_owner",
+    notificationType: "booking_request_sent_to_owner",
     meta: {
       source: "create-booking-and-payment",
       booking_date: booking.booking_date ?? null,
@@ -343,8 +339,8 @@ serve(async (req: Request) => {
   const params = new URLSearchParams();
   params.append("mode", "payment");
 
-  params.append("success_url", `${FRONTEND_BASE_URL}/borrower?stripe=success&booking_id=${bookingId}`);
-  params.append("cancel_url", `${FRONTEND_BASE_URL}/borrower?stripe=cancel&booking_id=${bookingId}`);
+  params.append("success_url", `${FRONTEND_BASE_URL}/dashboard?stripe=success&booking_id=${bookingId}`);
+  params.append("cancel_url", `${FRONTEND_BASE_URL}/dashboard?stripe=cancel&booking_id=${bookingId}`);
 
   params.append("line_items[0][price_data][currency]", "cad");
   params.append("line_items[0][price_data][product_data][name]",

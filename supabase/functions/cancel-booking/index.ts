@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.192.0/http/server.ts";
 import { sendEmail } from "../_shared/sendEmail.ts";
 import { hasNotificationBeenSent, logNotificationSent } from "../_shared/notificationLog.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -208,7 +209,7 @@ async function sendBorrowerDeclinedEmailIfNeeded(
     supabase,
     bookingId: booking.id,
     userId: borrower.id,
-    notificationType: "declined_borrower",
+    notificationType: "booking_request_declined_sent_to_borrower",
   });
 
   if (alreadySent) {
@@ -224,12 +225,14 @@ async function sendBorrowerDeclinedEmailIfNeeded(
     borrower.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your requested road test";
+  const bookingProvince =
+  (booking.province || "").toUpperCase() ||
+  "AB";
+
+const bookingDateText = formatBookingTime(
+  booking.scheduled_start_at ?? booking.booking_date,
+  bookingProvince
+);
 
   await sendEmail({
     to: borrower.email,
@@ -249,7 +252,7 @@ async function sendBorrowerDeclinedEmailIfNeeded(
         <p>You can request another bike or time from the marketplace.</p>
 
         <p>
-          <a href="https://borrowmybike.ca/browse-bikes" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+          <a href="https://borrowmybike.ca/browse" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
             Find another bike
           </a>
         </p>
@@ -264,7 +267,7 @@ async function sendBorrowerDeclinedEmailIfNeeded(
     bookingId: booking.id,
     userId: borrower.id,
     emailTo: borrower.email,
-    notificationType: "declined_borrower",
+    notificationType: "booking_request_declined_sent_to_borrower",
     meta: {
       source: "cancel-booking",
       booking_date: booking.booking_date ?? null,
@@ -314,7 +317,7 @@ async function sendOwnerBorrowerCancelledPreAcceptEmailIfNeeded(
     supabase,
     bookingId: booking.id,
     userId: owner.id,
-    notificationType: "borrower_cancelled_pre_accept_owner_notified",
+    notificationType: "booking_request_cancelled_pre_accept_sent_to_owner",
   });
 
   if (alreadySent) return;
@@ -324,12 +327,14 @@ async function sendOwnerBorrowerCancelledPreAcceptEmailIfNeeded(
     owner.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "the requested road test";
+  const bookingProvince =
+  (booking.province || "").toUpperCase() ||
+  "AB";
+
+const bookingDateText = formatBookingTime(
+  booking.scheduled_start_at ?? booking.booking_date,
+  bookingProvince
+);
 
   await sendEmail({
     to: owner.email,
@@ -350,7 +355,7 @@ async function sendOwnerBorrowerCancelledPreAcceptEmailIfNeeded(
     bookingId: booking.id,
     userId: owner.id,
     emailTo: owner.email,
-    notificationType: "borrower_cancelled_pre_accept_owner_notified",
+    notificationType: "booking_request_cancelled_pre_accept_sent_to_owner",
     meta: {
       source: "cancel-booking",
       booking_date: booking.booking_date ?? null,
@@ -399,8 +404,8 @@ async function sendAcceptedCancellationEmailIfNeeded(
 
   const notificationType =
     recipientRole === "owner"
-      ? "accepted_booking_cancelled_owner_notified"
-      : "accepted_booking_cancelled_borrower_notified";
+      ? "confirmed_booking_cancelled_sent_to_owner"
+      : "confirmed_booking_cancelled_sent_to_borrower";
 
   const alreadySent = await hasNotificationBeenSent({
     supabase,
@@ -416,12 +421,14 @@ async function sendAcceptedCancellationEmailIfNeeded(
     user.full_name?.trim() ||
     "there";
 
-  const bookingDateText = booking.booking_date
-    ? new Date(booking.booking_date).toLocaleString("en-CA", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : "your scheduled road test";
+  const bookingProvince =
+  (booking.province || "").toUpperCase() ||
+  "AB";
+
+const bookingDateText = formatBookingTime(
+  booking.scheduled_start_at ?? booking.booking_date,
+  bookingProvince
+);
 
   const cancellerText = cancelledBy === "owner" ? "mentor" : "test-taker";
   const timingText = early ? "more than 5 days before the test" : "within 5 days of the test";
