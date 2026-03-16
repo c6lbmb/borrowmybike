@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import { sb } from "../lib/supabase";
-import ChecklistGateModal, { type ChecklistItem } from "../components/ChecklistGateModal";
+import { type ChecklistItem } from "../components/ChecklistGateModal";
 import { acceptanceDeadlineMs, acceptanceHoursFor } from "../lib/acceptance";
 import Countdown from "../components/Countdown";
 import BookingMessages from "../components/BookingMessages";
+import { trackEvent } from "../lib/analytics";
 
 type BookingRow = {
   id: string;
@@ -91,7 +92,10 @@ function shortId(id?: string | null) {
 }
 
 function bookingStateLabel(b: BookingRow): string {
-  if (b.cancelled) return "Cancelled";
+  if (b.cancelled) {
+  if (b.cancelled_by === "system_expired") return "Expired";
+  return "Cancelled";
+}
   if (b.needs_review) return "Needs review";
   if (b.settled) {
     const outcome = (b.settlement_outcome || "").toLowerCase();
@@ -146,10 +150,10 @@ function noShowClaimWindowFor(b: BookingRow) {
   if (Number.isNaN(t)) return null;
 
   // No-show timeline:
-  // - Show the button 5 minutes after scheduled start (only if exactly one party checked in).
-  // - Enable (allow clicking) at 30 minutes after start (backend no-show rule).
-  const showMs = t + 5 * 60 * 1000;
-  const enableMs = t + 30 * 60 * 1000;
+  // - Show the button 10 minutes after scheduled start (only if exactly one party checked in).
+  // - Enable (allow clicking) at 10 minutes after start (backend no-show rule).
+  const showMs = t + 10 * 60 * 1000;
+  const enableMs = t + 10 * 60 * 1000;
   return { showMs, enableMs };
 }
 
@@ -157,7 +161,7 @@ function isWithin(now: number, openMs: number, closeMs: number): boolean {
   return now >= openMs && now <= closeMs;
 }
 
-// completion allowed: >= scheduled + 20 min (minimum only)
+// completion allowed: >= scheduled + 20 min (minimum only, matches backend)
 function completionAllowedAtFor(b: BookingRow) {
   const iso = scheduledIsoFor(b);
   if (!iso) return null;
@@ -225,11 +229,11 @@ function fmWindowOpen(b: BookingRow) {
 
   const now = Date.now();
   const msUntil = startMs - now;
-  return msUntil <= 24 * 60 * 60 * 1000 && msUntil >= 0;
+  return msUntil <= 2 * 60 * 60 * 1000 && msUntil >= 0;
 }
 
 function examinerRefusalWindowOpen(b: BookingRow) {
-  // After both check-ins, until 10 minutes after scheduled start.
+  // After both check-ins, and only near scheduled start.
   if (!isConfirmedBothPaid(b)) return false;
   if (!bothCheckedIn(b)) return false;
   if (b.owner_confirmed_complete) return false;
@@ -240,7 +244,8 @@ function examinerRefusalWindowOpen(b: BookingRow) {
   const startMs = new Date(iso as string).getTime();
   if (Number.isNaN(startMs)) return true;
 
-  return Date.now() <= startMs + 10 * 60 * 1000;
+   const now = Date.now();
+   return now >= startMs && now <= startMs + 10 * 60 * 1000;
 }
 
 
@@ -296,46 +301,23 @@ export default function OwnerDashboard() {
   const [refusalNote, setRefusalNote] = useState<string>("");
   const [refusalBusyId, setRefusalBusyId] = useState<string | null>(null);
 
+  const trackedOwnerCheckIns = useRef<Record<string, boolean>>({});
+  const trackedOwnerAccepts = useRef<Record<string, boolean>>({});
+  const trackedOwnerCompletions = useRef<Record<string, boolean>>({});
+
   // Mentor accept checklist gate
-  const [gateOpen, setGateOpen] = useState(false);
-  // Deposit preference is captured right before settlement (after the bike is returned), not at accept.
   const [gateBooking, setGateBooking] = useState<BookingRow | null>(null);
+  // Deposit preference is captured right before settlement (after the bike is returned), not at accept.
+  const [gateChecks, setGateChecks] = useState<Record<string, boolean>>({});
 
   const ownerAcceptChecklist: ChecklistItem[] = useMemo(
-    () => [
-      {
-      id: "supervision",
-      label: (
-        <>
-          I understand my bike stays under <b>supervision</b>: I see it before and after the test,
-          and during the road test it is also in the examiner’s view.
-        </>
-      ),
-    },
-    {
-      id: "care",
-      label: (
-        <>
-          I understand road tests are typically handled <b>carefully</b> because the rider’s goal is
-          to earn their Class 6, not take risks or damage the bike.
-        </>
-      ),
-    },
-    {
-      id: "messaging",
-      label: (
-        <>
-          I will use <b>in-app messaging</b> before accepting to confirm timing, registry location,
-          and any expectations so both sides feel prepared.
-        </>
-      ),
-    },
+  () => [
     {
       id: "ready",
       label: (
         <>
-          I confirm the bike is <b>road-test ready</b>: lights, signals, brakes, tires, mirrors, and
-          no warning lights or obvious mechanical issues.
+          I confirm my <b>motorcycle is road-test ready</b>, including working lights, signals, brakes, mirrors, and no
+          obvious mechanical issues.
         </>
       ),
     },
@@ -343,32 +325,73 @@ export default function OwnerDashboard() {
       id: "docs",
       label: (
         <>
-          I will make sure <b>valid registration and insurance</b> are available and that there is
-          enough fuel for the registry trip, test, and return.
+          I will have <b>valid registration and insurance</b> available, and sufficient fuel for the trip to the registry,
+          the test, and the return trip.
         </>
       ),
     },
     {
-      id: "possession",
+      id: "coordination_unlocks",
       label: (
         <>
-          I understand I should arrive on time, keep track of my bike throughout the meetup, and
-          verify it is back in my possession after the test.
+          I understand that the <b>exact registry location</b> and <b>in-app messaging</b> unlock after I accept the booking request.
         </>
       ),
     },
     {
-      id: "deposit_rules",
+      id: "arrive_early",
       label: (
         <>
-          I understand accepting means paying my <b>mentor deposit</b> now unless credit covers it,
-          and platform cancellation, no-show, and fault rules apply once I accept.
+          I will arrive <b>at least 20 minutes before</b> the test start time to allow the test taker to get acquainted
+          with the motorcycle.
+        </>
+      ),
+    },
+    {
+      id: "deposit_policy",
+      label: (
+        <>
+          I understand the purpose of the <b>mentor deposit</b> and that it will be refunded according to the
+          <b> platform deposit policy</b>.
+        </>
+      ),
+    },
+    {
+      id: "rules_apply",
+      label: (
+        <>
+          I understand the platform’s <b>cancellation, no-show, and fault rules</b> apply once I accept the request.
+        </>
+      ),
+    },
+    {
+      id: "authorized_owner",
+      label: (
+        <>
+          I confirm that I am the <b>authorized owner or permitted operator</b> of this motorcycle.
         </>
       ),
     },
   ],
-  [],
+  []
 );
+
+const gateAllChecked = useMemo(() => {
+  if (!gateBooking) return false;
+  return ownerAcceptChecklist.every((item) => !!gateChecks[item.id]);
+}, [gateBooking, gateChecks, ownerAcceptChecklist]);
+
+function openAcceptChecklist(b: BookingRow) {
+  const next: Record<string, boolean> = {};
+  for (const item of ownerAcceptChecklist) next[item.id] = false;
+  setGateChecks(next);
+  setGateBooking(b);
+}
+
+function closeAcceptChecklist() {
+  setGateBooking(null);
+  setGateChecks({});
+}
 
   async function load() {
     if (!me) return;
@@ -426,6 +449,43 @@ export default function OwnerDashboard() {
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
+  useEffect(() => {
+    if (!me) return;
+
+    for (const b of rows) {
+      if (isConfirmedPaid(b) && !trackedOwnerAccepts.current[b.id]) {
+        trackedOwnerAccepts.current[b.id] = true;
+        trackEvent("owner_accepted_booking", {
+          booking_id: b.id,
+          bike_id: b.bike_id,
+          scheduled_start_at: scheduledIsoFor(b) ?? "",
+        });
+      }
+
+      const ownerChecked = hasOwnerCheckedIn(b);
+      if (ownerChecked && !trackedOwnerCheckIns.current[b.id]) {
+        trackedOwnerCheckIns.current[b.id] = true;
+        trackEvent("owner_checked_in", {
+          booking_id: b.id,
+          bike_id: b.bike_id,
+          scheduled_start_at: scheduledIsoFor(b) ?? "",
+        });
+      }
+
+      const ownerCompleted = !!b.owner_confirmed_complete;
+      if (ownerCompleted && !trackedOwnerCompletions.current[b.id]) {
+        trackedOwnerCompletions.current[b.id] = true;
+        trackEvent("booking_completed", {
+          booking_id: b.id,
+          bike_id: b.bike_id,
+          role: "owner",
+          settlement_outcome: b.settlement_outcome ?? "",
+          scheduled_start_at: scheduledIsoFor(b) ?? "",
+        });
+      }
+    }
+  }, [me, rows]);
+
 
   async function checkInAsOwner(b: BookingRow) {
     const w = checkInWindowFor(b);
@@ -444,6 +504,7 @@ export default function OwnerDashboard() {
         body: { booking_id: b.id, role: "owner" },
       });
       if (error) throw error;
+      trackEvent("owner_check_in_clicked", { booking_id: b.id, bike_id: b.bike_id, scheduled_start_at: scheduledIsoFor(b) ?? "" });
       await load();
     } catch (e: any) {
       setErr(e?.message || "Check-in failed");
@@ -483,6 +544,7 @@ Proceed?`
         body: { booking_id: b.id, claim_no_show: true, claimant_role: "owner" },
       });
       if (error) throw error;
+      trackEvent("no_show_claimed", { booking_id: b.id, bike_id: b.bike_id, claimant_role: "owner", scheduled_start_at: scheduledIsoFor(b) ?? "" });
 
       await load();
     } catch (e: any) {
@@ -536,6 +598,8 @@ async function confirmBikeReturnedAsOwner(b: BookingRow) {
         body: { booking_id: b.id, role: "owner" },
       });
       if (error) throw error;
+      trackEvent("booking_completed", { booking_id: b.id, bike_id: b.bike_id, role: "owner", scheduled_start_at: scheduledIsoFor(b) ?? "" });
+      trackedOwnerCompletions.current[b.id] = true;
 
       await load();
     } catch (e: any) {
@@ -594,6 +658,8 @@ async function confirmBikeReturnedAsOwner(b: BookingRow) {
 
       const url = (data as any)?.checkout_url;
       if (url) {
+        trackEvent("owner_accepted_booking", { booking_id: b.id, bike_id: b.bike_id, payment_method: "checkout", scheduled_start_at: scheduledIsoFor(b) ?? "" });
+        trackedOwnerAccepts.current[b.id] = true;
         window.location.href = url;
         return;
       }
@@ -602,6 +668,8 @@ async function confirmBikeReturnedAsOwner(b: BookingRow) {
       const ok = (data as any)?.ok;
       const method = (data as any)?.method;
       if (ok && method === "credit") {
+        trackEvent("owner_accepted_booking", { booking_id: b.id, bike_id: b.bike_id, payment_method: "credit", scheduled_start_at: scheduledIsoFor(b) ?? "" });
+        trackedOwnerAccepts.current[b.id] = true;
         await load();
         return;
       }
@@ -633,7 +701,7 @@ async function confirmBikeReturnedAsOwner(b: BookingRow) {
     border: "1px solid #0f172a",
     background: "#0f172a",
     color: "white",
-    fontWeight: 950,
+    fontWeight: 600,
     cursor: "pointer",
     textDecoration: "none",
     display: "inline-flex",
@@ -646,7 +714,7 @@ async function confirmBikeReturnedAsOwner(b: BookingRow) {
     borderRadius: 14,
     border: "1px solid #cbd5e1",
     background: "white",
-    fontWeight: 950,
+    fontWeight: 600,
     cursor: "pointer",
     textDecoration: "none",
     color: "#0f172a",
@@ -751,6 +819,8 @@ This will flag the booking for review and rebooking. Continue?`,
 
       if (error) throw error;
 
+      trackEvent("examiner_refusal_reported", { booking_id: b.id, bike_id: b.bike_id, reported_by: "owner", reason_code: refusalReason || "", scheduled_start_at: scheduledIsoFor(b) ?? "" });
+
       // optimistic UI update (true source of truth is load/polling)
       setRows((cur) =>
         cur.map((r) =>
@@ -776,55 +846,20 @@ This will flag the booking for review and rebooking. Continue?`,
     }
   }
 
-return (
-    <div style={{ padding: "2rem" }}>
-      <ChecklistGateModal
-  open={gateOpen}
-  title="Before you accept…"
-  intro={
-    <>
-      <div style={{ fontWeight: 800, marginBottom: 6 }}>
-        Before you accept, please confirm the points below.
-      </div>
-      <div>
-        Your bike stays in a controlled road-test setting. You see it before and after the test,
-        and during the test it is also in the examiner’s view. Road tests are handled carefully
-        because the rider’s goal is to earn their Class 6, not take risks.
-      </div>
-      <div style={{ marginTop: 8 }}>
-        In-app messaging is there to help you coordinate timing, meeting details, and expectations
-        before you accept.
-      </div>
-    </>
-  }
-  requiredItems={ownerAcceptChecklist}
-  footerNote={
-    <>
-      Accepting means you are confirming that you understand the request, the timeline, and your
-      responsibilities as the mentor. The same checklist is shown here so nothing is easy to miss.
-    </>
-  }
-  confirmText="I agree — continue to deposit"
-  cancelText="Go back"
-  onCancel={() => {
-    setGateOpen(false);
-  }}
-  onConfirm={() => {
-    if (gateBooking) {
-      setGateOpen(false);
-      void doAcceptWithDeposit(gateBooking);
-    }
-  }}
-/>
+const page: React.CSSProperties = { padding: "2rem" };
+
+  return (
+    <div style={page}>
+  
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 28, fontWeight: 1000 }}>Mentor Dashboard</div>
-          <div style={{ marginTop: 4, color: "#64748b", fontWeight: 800 }}>Your bookings + acceptance window.</div>
+          <div style={{ fontSize: 28, fontWeight: 600 }}>Mentor Dashboard</div>
+          <div style={{ marginTop: 4, color: "#64748b", fontWeight: 600 }}>Your bookings + acceptance window.</div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Link to="/browse" style={{ fontWeight: 900 }}>
+          <Link to="/browse" style={{ fontWeight: 600 }}>
             Browse →
           </Link>
           <button
@@ -832,7 +867,7 @@ return (
               padding: "10px 12px",
               borderRadius: 14,
               border: "1px solid #cbd5e1",
-              fontWeight: 900,
+              fontWeight: 600,
               cursor: "pointer",
               background: "white",
             }}
@@ -849,20 +884,20 @@ return (
 
       {err && (
         <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #fecaca", background: "#fff1f2" }}>
-          <div style={{ fontWeight: 900, color: "#b00020" }}>Error</div>
-          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 800 }}>{err}</div>
+          <div style={{ fontWeight: 600, color: "#b00020" }}>Error</div>
+          <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 600 }}>{err}</div>
         </div>
       )}
 
       {/* My Bike (fast access + thumbnail) */}
       <div style={{ marginTop: 16, ...cardShell }}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>{bikeTitle}</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
+        <div style={{ fontWeight: 600, fontSize: 18 }}>{bikeTitle}</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 820 }}>
           Quick access to your listing. Keep it up to date so test-takers can book confidently.
         </div>
 
         {loadingBike ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>Loading…</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>Loading…</div>
         ) : bike ? (
           <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "120px 1fr", gap: 14, alignItems: "center" }}>
             <div
@@ -887,14 +922,14 @@ return (
                 />
               ) : null}
               {!bikeThumb ? (
-                <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 900 }}>
+                <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 600 }}>
                   No photo
                 </div>
               ) : null}
             </div>
 
             <div>
-              <div style={{ color: "#64748b", fontWeight: 800 }}>
+              <div style={{ color: "#64748b", fontWeight: 600 }}>
                 {bike.city || "—"}, {bike.province || "—"} • {bike.is_active ? "Active ✅" : "Inactive ❌"}
               </div>
 
@@ -903,14 +938,14 @@ return (
                   Edit my bike →
                 </Link>
                 <Link to="/mentors" style={btnSecondary}>
-                  Mentor info →
+                  Edit mentor info →
                 </Link>
               </div>
             </div>
           </div>
         ) : (
           <div style={{ marginTop: 12 }}>
-            <div style={{ color: "#64748b", fontWeight: 800 }}>No bike listed yet.</div>
+            <div style={{ color: "#64748b", fontWeight: 600 }}>No bike listed yet.</div>
             <div style={{ marginTop: 12 }}>
               <Link to="/mentors/new" style={btnPrimary}>
                 Start / Add my bike →
@@ -922,17 +957,17 @@ return (
 
       {/* Requests */}
       <div style={{ marginTop: 16, ...cardShell }}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Requests</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>Requests waiting for your decision. Review the checklist below before you accept.</div>
+        <div style={{ fontWeight: 600, fontSize: 18 }}>Requests</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 820 }}>Requests waiting for your decision. Review the checklist below before you accept.</div>
 
         {pending.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No pending requests.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No pending requests.</div>
         ) : (
           <div style={{ marginTop: 12 }}>
             {pending.map((b) => (
               <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
-                <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
-                <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>scheduled: {fmtDateTime(scheduledIsoFor(b))}</div>
+                <div style={{ fontWeight: 600 }}>Booking {shortId(b.id)}</div>
+                <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>scheduled: {fmtDateTime(scheduledIsoFor(b))}</div>
 
                 {(() => {
                   const intro = (b.test_taker_intro || "").trim();
@@ -955,11 +990,11 @@ return (
                         padding: 12,
                       }}
                     >
-                      <div style={{ fontWeight: 950, color: "#0f172a" }}>Test-taker info</div>
-                      <div style={{ marginTop: 6, color: "#334155", fontWeight: 800, lineHeight: 1.35 }}>
+                      <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 15 }}>Test-taker info</div>
+                      <div style={{ marginTop: 6, color: "#334155", fontWeight: 600, lineHeight: 1.55 }}>
                         {intro ? <>“{intro}”</> : <span style={{ color: "#64748b" }}>No intro provided.</span>}
                       </div>
-                      <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", color: "#475569", fontWeight: 850 }}>
+                      <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap", color: "#475569", fontWeight: 600 }}>
                         {tw ? <span style={{ padding: "4px 10px", borderRadius: 999, border: "1px solid #cbd5e1", background: "white" }}>Time window: {twLabel}</span> : null}
                         {rq ? <span style={{ padding: "4px 10px", borderRadius: 999, border: "1px solid #cbd5e1", background: "white" }}>Registry area: {rq}</span> : null}
                       </div>
@@ -967,7 +1002,7 @@ return (
                   );
                 })()}
 
-                <div style={{ marginTop: 10, color: "#64748b", fontWeight: 750, fontSize: 13 }}>
+                <div style={{ marginTop: 10, color: "#64748b", fontWeight: 600, fontSize: 13, lineHeight: 1.5, maxWidth: 760 }}>
                   Accepting this request means paying the mentor deposit now (unless your credit covers it).
                 </div>
 
@@ -982,16 +1017,15 @@ return (
   if (!deadline) return null;
 
   const acceptanceExpired = Date.now() > (deadline as number);
-  const tooLate = Number.isFinite(scheduledMs) && Date.now() > scheduledMs - 15 * 60 * 1000;
 
-  return (
-    <div style={{ marginTop: 10 }}>
-      {inPast || acceptanceExpired || tooLate ? (
-        <div style={{ color: "#b00020", fontWeight: 900 }}>
-          This request is expired{tooLate && !inPast ? " (too close to the scheduled time)." : "."}
-        </div>
+return (
+  <div style={{ marginTop: 10 }}>
+    {inPast || acceptanceExpired ? (
+      <div style={{ color: "#b00020", fontWeight: 600 }}>
+        This request is expired.
+      </div>
       ) : (
-        <div style={{ color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+        <div style={{ color: "#64748b", fontWeight: 600, fontSize: 12 }}>
           Accept window ({hours}h): <Countdown deadlineMs={deadline as number} />
         </div>
       )}
@@ -1003,7 +1037,7 @@ return (
                   <button
                     onClick={() => {
                       const iso = scheduledIsoFor(b);
-                      const scheduledMs = iso ? new Date(iso as string).getTime() : NaN;
+                      
                       const deadline = acceptanceDeadlineMs({
                         createdAtIso: b.created_at || null,
                         scheduledIso: iso || null,
@@ -1014,26 +1048,21 @@ return (
                         return;
                       }
 
-                      if (Number.isFinite(scheduledMs) && Date.now() > scheduledMs - 15 * 60 * 1000) {
-                        setErr("Too late to accept for this time. Ask the borrower to rebook.");
-                        return;
-                      }
+                     
 
-                      setGateBooking(b);
-                      setGateOpen(true);
+                     openAcceptChecklist(b);
                     }}
 
                     disabled={(() => {
                       if (busyId === b.id) return true;
                       const iso = scheduledIsoFor(b);
-                      const scheduledMs = iso ? new Date(iso as string).getTime() : NaN;
+                      
                       const deadline = acceptanceDeadlineMs({
                         createdAtIso: b.created_at || null,
                         scheduledIso: iso || null,
                       });
                       const acceptanceExpired = deadline != null ? Date.now() > (deadline as number) : false;
-                      const tooLate = Number.isFinite(scheduledMs) && Date.now() > scheduledMs - 15 * 60 * 1000;
-                      return acceptanceExpired || tooLate;
+                      return acceptanceExpired;
                     })()}
 
                     style={{
@@ -1042,7 +1071,7 @@ return (
                       border: "1px solid #0f172a",
                       background: "#0f172a",
                       color: "white",
-                      fontWeight: 950,
+                      fontWeight: 600,
                       cursor: "pointer",
                       opacity: busyId === b.id ? 0.7 : 1,
                     }}
@@ -1058,7 +1087,7 @@ return (
                       borderRadius: 14,
                       border: "1px solid #cbd5e1",
                       background: "white",
-                      fontWeight: 950,
+                      fontWeight: 600,
                       cursor: "pointer",
                       opacity: busyId === b.id ? 0.7 : 1,
                     }}
@@ -1067,31 +1096,109 @@ return (
                   </button>
                 </div>
 
-                <details
-                  style={{
-                    marginTop: 12,
-                    border: "1px solid #dbeafe",
-                    background: "#f8fbff",
-                    borderRadius: 14,
-                    padding: 12,
-                  }}
-                >
-                  <summary style={{ cursor: "pointer", listStyle: "none" }}>
-                    <div style={{ fontWeight: 950, color: "#0f172a" }}>Before you accept</div>
-                    <div style={{ marginTop: 6, color: "#475569", fontWeight: 750, fontSize: 13 }}>
-                      The same checklist will appear when you click <b>Accept</b>.
-                    </div>
-                  </summary>
-                  <ul style={{ margin: "12px 0 0", paddingLeft: 18, color: "#334155", lineHeight: 1.6 }}>
-                    <li>Your bike stays under supervision: your own eyes before and after the test, and the examiner’s eyes during the road test.</li>
-                    <li>Road tests are typically handled carefully because the rider wants to earn their Class 6, not take risks or damage the bike.</li>
-                    <li>Use in-app messaging before accepting to confirm timing, registry location, and any expectations so both sides feel prepared.</li>
-                    <li>Confirm the bike is road-test ready: lights, signals, brakes, tires, mirrors, and no warning lights or obvious mechanical issues.</li>
-                    <li>Make sure valid registration and insurance are available and that there is enough fuel for the registry trip, test, and return.</li>
-                    <li>You should be able to arrive on time, keep track of your bike throughout the meetup, and verify it is back in your possession after the test.</li>
-                    <li>Accepting means paying your mentor deposit now unless credit covers it, and platform cancellation, no-show, and fault rules apply once you accept.</li>
-                  </ul>
-                </details>
+                {gateBooking?.id === b.id && (
+  <div
+    style={{
+      marginTop: 12,
+      border: "1px solid #dbeafe",
+      background: "#f8fbff",
+      borderRadius: 14,
+      padding: 14,
+    }}
+  >
+    <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 18 }}>
+      Before you accept
+    </div>
+
+    <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, fontSize: 13, lineHeight: 1.55, maxWidth: 760 }}>
+      Only accept requests that already look workable based on the time, registry area, and information shown.
+    </div>
+
+    <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+      {ownerAcceptChecklist.map((item) => (
+        <label
+          key={item.id}
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+            border: "1px solid #e2e8f0",
+            background: "white",
+            borderRadius: 12,
+            padding: 12,
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={!!gateChecks[item.id]}
+            onChange={(e) =>
+              setGateChecks((prev) => ({
+                ...prev,
+                [item.id]: e.target.checked,
+              }))
+            }
+            style={{ marginTop: 3 }}
+          />
+          <div style={{ color: "#334155", lineHeight: 1.6, fontWeight: 500 }}>
+            {item.label ?? item.text ?? ""}
+          </div>
+        </label>
+      ))}
+    </div>
+
+    <div style={{ marginTop: 12, color: "#475569", fontWeight: 600, fontSize: 13, lineHeight: 1.5 }}>
+      Please review the platform rules before continuing:{" "}
+      <Link to="/rules" style={{ fontWeight: 600 }}>
+        Rules &amp; Process
+      </Link>{" "}
+      and{" "}
+      <Link to="/legal" style={{ fontWeight: 600 }}>
+        Legal &amp; Policies
+      </Link>
+      .
+    </div>
+
+    <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <button
+        onClick={closeAcceptChecklist}
+        type="button"
+        style={{
+          padding: "10px 14px",
+          borderRadius: 14,
+          border: "1px solid #cbd5e1",
+          background: "white",
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        Go back
+      </button>
+
+      <button
+        onClick={() => {
+          if (gateBooking) {
+            void doAcceptWithDeposit(gateBooking);
+          }
+        }}
+        disabled={!gateAllChecked || busyId === b.id}
+        type="button"
+        style={{
+          padding: "10px 14px",
+          borderRadius: 14,
+          border: "1px solid #0f172a",
+          background: "#0f172a",
+          color: "white",
+          fontWeight: 600,
+          cursor: "pointer",
+          opacity: !gateAllChecked || busyId === b.id ? 0.6 : 1,
+        }}
+      >
+        {busyId === b.id ? "…" : "I understand — accept and continue"}
+      </button>
+    </div>
+  </div>
+)}
               </div>
             ))}
           </div>
@@ -1100,14 +1207,14 @@ return (
 
       {/* Upcoming / Confirmed */}
       <div style={{ marginTop: 16, ...cardShell }}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>Upcoming / Confirmed</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>These are accepted bookings (mentor deposit paid).</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
-          You receive <b>$100</b> once the test is completed and you confirm <b>YOUR</b> bike is returned.
+        <div style={{ fontWeight: 600, fontSize: 18 }}>Upcoming / Confirmed</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 820 }}>These are accepted bookings (mentor deposit paid).</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 820 }}>
+          You receive <b>$100</b> once the test is completed and you confirm your bike is returned.
         </div>
 
         {upcoming.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No upcoming bookings.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No upcoming bookings.</div>
         ) : (
           <div style={{ marginTop: 12 }}>
             {upcoming.map((b) => {
@@ -1130,8 +1237,8 @@ return (
 
               return (
                 <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
-                  <div style={{ fontWeight: 1000 }}>Booking {shortId(b.id)}</div>
-                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
+                  <div style={{ fontWeight: 600 }}>Booking {shortId(b.id)}</div>
+                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>
                     scheduled: {fmtDateTime(scheduledIsoFor(b))} • bike: {shortId(b.bike_id)}
              {(() => {
                const scheduledIso = scheduledIsoFor(b);
@@ -1146,13 +1253,13 @@ return (
                return (
                  <div style={{ marginTop: 8 }}>
                    {showRequestMeta && inPast && (
-                     <div style={{ color: "#b00020", fontWeight: 900 }}>
+                     <div style={{ color: "#b00020", fontWeight: 600 }}>
                        This request is expired (scheduled time already passed).
                      </div>
                    )}
 
                    {showRequestMeta && deadline && !inPast && (
-                     <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+                     <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600, fontSize: 12 }}>
                        Accept window ({hours}h): <Countdown deadlineMs={deadline as number} />
                      </div>
                    )}
@@ -1162,14 +1269,14 @@ return (
     
                   </div>
 
-                  <div style={{ marginTop: 10, fontWeight: 900, color: "#0f172a" }}>
+                  <div style={{ marginTop: 10, fontWeight: 600, color: "#0f172a", lineHeight: 1.55 }}>
                     Mentor check-in: {ownerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Test-taker check-in: {borrowerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Mentor possession: {ownerPossession ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Test-taker complete: {borrowerComplete ? "✅" : "—"}
                   </div>
 
-                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 800, fontSize: 13 }}>
+                  <div style={{ marginTop: 10, color: "#475569", fontWeight: 600, fontSize: 13, lineHeight: 1.55, maxWidth: 760 }}>
                     Tip: both parties must check in before you can confirm possession.{" "}
                     {comp && !canConfirmTime ? <>Completion unlocks at <b>{fmtDateTime(new Date(comp.allowedAtMs).toISOString())}</b>.</> : null}
                   </div>
@@ -1195,7 +1302,7 @@ return (
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy || ownerChecked ? 0.6 : 1,
                       }}
@@ -1232,13 +1339,13 @@ return (
                         <button
                           onClick={() => claimNoShowAsOwner(b)}
                           disabled={isBusy || !canClickNoShow}
-                          title="Report a no-show (shows 5 minutes after start; becomes clickable 30 minutes after start, only if you checked in and the test-taker did not)."
+                          title="Report a no-show (available 10 minutes after start, only if you checked in and the test-taker did not)."
                           style={{
                             padding: "10px 14px",
                             borderRadius: 14,
                             border: "1px solid #cbd5e1",
                             background: "white",
-                            fontWeight: 950,
+                            fontWeight: 600,
                             cursor: "pointer",
                             opacity: isBusy ? 0.6 : 1,
                           }}
@@ -1272,7 +1379,7 @@ return (
                         border: "1px solid #0f172a",
                         background: "#0f172a",
                         color: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy || !canConfirmPossession ? 0.6 : 1,
                       }}
@@ -1292,7 +1399,7 @@ return (
                           borderRadius: 14,
                           border: "1px solid #cbd5e1",
                           background: "white",
-                          fontWeight: 950,
+                          fontWeight: 600,
                           cursor: "pointer",
                           opacity: isBusy || fmBusyId === b.id || !!b.force_majeure_owner_agreed_at ? 0.6 : 1,
                         }}
@@ -1302,7 +1409,7 @@ return (
                     )}
 
                     {b.force_majeure_owner_agreed_at && !b.force_majeure_borrower_agreed_at && !bothCheckedIn(b) && (
-                      <div style={{ alignSelf: "center", fontWeight: 800, color: "#64748b" }}>
+                      <div style={{ alignSelf: "center", fontWeight: 600, color: "#64748b" }}>
                         Waiting for test-taker to confirm FM.
                       </div>
                     )}
@@ -1321,7 +1428,7 @@ return (
                           borderRadius: 14,
                           border: "1px solid #cbd5e1",
                           background: "white",
-                          fontWeight: 950,
+                          fontWeight: 600,
                           cursor: "pointer",
                           opacity: isBusy ? 0.6 : 1,
                         }}
@@ -1340,7 +1447,7 @@ return (
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy ? 0.6 : 1,
                       }}
@@ -1360,7 +1467,7 @@ return (
                         borderRadius: 14,
                         border: "1px solid #cbd5e1",
                         background: "white",
-                        fontWeight: 950,
+                        fontWeight: 600,
                         cursor: "pointer",
                         opacity: isBusy || hideForfeit ? 0.6 : 1,
                       }}
@@ -1400,13 +1507,13 @@ return (
                         background: "#ffffff",
                       }}
                     >
-                      <div style={{ fontWeight: 950 }}>Examiner refuses test</div>
-                      <div style={{ marginTop: 6, color: "#475569", fontWeight: 750, fontSize: 13 }}>
+                      <div style={{ fontWeight: 600, fontSize: 16 }}>Examiner refuses test</div>
+                      <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, fontSize: 13, lineHeight: 1.55, maxWidth: 760 }}>
                         Choose the closest reason. Language stays neutral.
                       </div>
 
                       <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 850 }}>
+                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 500, color: "#334155" }}>
                           <input
                             type="radio"
                             name={`refusal-${b.id}`}
@@ -1415,7 +1522,7 @@ return (
                           />
                           Issue with motorcycle
                         </label>
-                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 850 }}>
+                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 500, color: "#334155" }}>
                           <input
                             type="radio"
                             name={`refusal-${b.id}`}
@@ -1424,7 +1531,7 @@ return (
                           />
                           Test-taker not ready today
                         </label>
-                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 850 }}>
+                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 500, color: "#334155" }}>
                           <input
                             type="radio"
                             name={`refusal-${b.id}`}
@@ -1433,7 +1540,7 @@ return (
                           />
                           Unavoidable conditions (weather / closure / emergency)
                         </label>
-                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 850 }}>
+                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 500, color: "#334155" }}>
                           <input
                             type="radio"
                             name={`refusal-${b.id}`}
@@ -1444,7 +1551,7 @@ return (
                         </label>
                       </div>
                       <div style={{ marginTop: 12 }}>
-                        <div style={{ fontWeight: 850, color: "#475569", fontSize: 13 }}>Optional note (short)</div>
+                        <div style={{ fontWeight: 600, color: "#475569", fontSize: 13, lineHeight: 1.55 }}>Optional note (short)</div>
                         <textarea
                           value={refusalNote}
                           onChange={(e) => setRefusalNote(e.target.value)}
@@ -1456,7 +1563,7 @@ return (
                             borderRadius: 12,
                             border: "1px solid #e2e8f0",
                             padding: 10,
-                            fontWeight: 700,
+                            fontWeight: 600,
                           }}
                         />
                       </div>
@@ -1472,7 +1579,7 @@ return (
                             border: "1px solid #0f172a",
                             background: "#0f172a",
                             color: "white",
-                            fontWeight: 950,
+                            fontWeight: 600,
                             cursor: "pointer",
                             opacity: isBusy || refusalBusyId === b.id || !refusalReason ? 0.6 : 1,
                           }}
@@ -1492,7 +1599,7 @@ return (
                             borderRadius: 14,
                             border: "1px solid #cbd5e1",
                             background: "white",
-                            fontWeight: 950,
+                            fontWeight: 600,
                             cursor: "pointer",
                             opacity: isBusy ? 0.6 : 1,
                           }}
@@ -1513,13 +1620,13 @@ return (
 
       {/* History */}
       <div style={{ marginTop: 16, ...cardShell }}>
-        <div style={{ fontWeight: 1000, fontSize: 18 }}>History</div>
-        <div style={{ marginTop: 6, color: "#475569", fontWeight: 700 }}>
+        <div style={{ fontWeight: 600, fontSize: 18 }}>History</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 820 }}>
           Past/expired/cancelled bookings live here so “Requests” stays clean.
         </div>
 
         {history.length === 0 ? (
-          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 800 }}>No history yet.</div>
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No history yet.</div>
         ) : (
           <div style={{ marginTop: 12, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
@@ -1538,9 +1645,9 @@ return (
 
                   return (
                     <tr key={b.id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                      <td style={{ padding: "10px 0", fontWeight: 900 }}>{shortId(b.id)}</td>
-                      <td style={{ padding: "10px 0", fontWeight: 800, color: "#334155" }}>{fmtDateTime(whenIso)}</td>
-                      <td style={{ padding: "10px 0", fontWeight: 900 }}>{state}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 600 }}>{shortId(b.id)}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 600, color: "#334155" }}>{fmtDateTime(whenIso)}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 600 }}>{state}</td>
                     </tr>
                   );
                 })}
@@ -1548,7 +1655,7 @@ return (
             </table>
 
             {history.length > 25 ? (
-              <div style={{ marginTop: 10, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+              <div style={{ marginTop: 10, color: "#64748b", fontWeight: 600, fontSize: 12 }}>
                 Showing latest 25 history rows.
               </div>
             ) : null}

@@ -13,9 +13,7 @@ function isActive(pathname: string, href: string) {
 
 function formatMoney(amount: number | null) {
   if (amount == null) return "—";
-  // credits are stored as numeric; keep simple display
   const rounded = Math.round(amount * 100) / 100;
-  // show no decimals when clean integer
   return Number.isInteger(rounded) ? `$${rounded}` : `$${rounded.toFixed(2)}`;
 }
 
@@ -23,16 +21,13 @@ export default function Layout() {
   const loc = useLocation();
   const navg = useNavigate();
   const { user } = useAuth();
-
-  // Mobile menu
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [creditsTotal, setCreditsTotal] = useState<number | null>(null);
 
-  // Close menu on navigation
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [loc.pathname]);
 
-  // Try a few common places Supabase user email might live
   const email =
     (user as any)?.email ||
     (user as any)?.user_metadata?.email ||
@@ -40,9 +35,6 @@ export default function Layout() {
     null;
 
   const me = (user as any)?.id ?? null;
-
-  // Credits (global display)
-  const [creditsTotal, setCreditsTotal] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +46,6 @@ export default function Layout() {
         return;
       }
 
-      // If RLS blocks this, we fail silently and show "—"
       try {
         const res = await sb
           .from("credits")
@@ -73,7 +64,6 @@ export default function Layout() {
       }
     }
 
-    // initial load + light polling so newly-issued credits show up without refresh
     loadCredits();
     timer = window.setInterval(loadCredits, 30000);
 
@@ -87,7 +77,7 @@ export default function Layout() {
     minHeight: "100vh",
     background: "#f8fafc",
     color: "#0f172a",
-    overflowX: "hidden", // guard: never allow sideways scroll from layout wrappers
+    overflowX: "hidden",
   };
 
   const header: React.CSSProperties = {
@@ -103,11 +93,10 @@ export default function Layout() {
     gridTemplateColumns: "auto 1fr auto",
     alignItems: "center",
     gap: 16,
-    position: "relative", // for mobile dropdown positioning
+    position: "relative",
     minWidth: 0,
   };
 
-  /* BRAND */
   const brand: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
@@ -121,14 +110,12 @@ export default function Layout() {
     display: "block",
   };
 
-  /* NAV */
   const nav: React.CSSProperties = {
     display: "flex",
     justifyContent: "center",
     gap: 18,
     flexWrap: "wrap",
     alignItems: "center",
-    fontWeight: 900,
     minWidth: 0,
   };
 
@@ -136,20 +123,17 @@ export default function Layout() {
     textDecoration: "none",
     color: isActive(loc.pathname, href) ? "#C9A227" : "#0f172a",
     fontWeight: isActive(loc.pathname, href) ? 700 : 500,
-    borderBottom: isActive(loc.pathname, href)
-      ? "2px solid #C9A227"
-      : "2px solid transparent",
+    borderBottom: isActive(loc.pathname, href) ? "2px solid #C9A227" : "2px solid transparent",
     paddingBottom: 4,
     whiteSpace: "nowrap",
   });
 
-  /* RIGHT AUTH AREA */
   const rightArea: React.CSSProperties = {
     display: "flex",
-    flexDirection: "column", // stack buttons + meta lines
+    flexDirection: "column",
     alignItems: "flex-end",
     gap: 6,
-    minWidth: 0, // IMPORTANT: fixed minWidth here causes mobile overflow
+    minWidth: 0,
   };
 
   const rightButtons: React.CSSProperties = {
@@ -163,7 +147,7 @@ export default function Layout() {
   const authLink: React.CSSProperties = {
     textDecoration: "none",
     color: "#0f172a",
-    fontWeight: 900,
+    fontWeight: 600,
     border: "1px solid #cbd5e1",
     background: "white",
     padding: "8px 12px",
@@ -175,18 +159,17 @@ export default function Layout() {
     border: "1px solid #cbd5e1",
     background: "white",
     color: "#0f172a",
-    fontWeight: 900,
+    fontWeight: 600,
     padding: "8px 12px",
     borderRadius: 12,
     cursor: "pointer",
     whiteSpace: "nowrap",
   };
 
-  // Same subtle style as Signed-in email line (as you requested)
   const metaLine: React.CSSProperties = {
     fontSize: 12,
     color: "#64748b",
-    fontWeight: 450,
+    fontWeight: 400,
     lineHeight: 1.2,
     textAlign: "right",
     maxWidth: 260,
@@ -195,12 +178,11 @@ export default function Layout() {
     whiteSpace: "nowrap",
   };
 
-  // Mobile menu button
   const mobileMenuBtn: React.CSSProperties = {
     border: "1px solid #cbd5e1",
     background: "white",
     color: "#0f172a",
-    fontWeight: 900,
+    fontWeight: 600,
     padding: "8px 12px",
     borderRadius: 12,
     cursor: "pointer",
@@ -224,7 +206,7 @@ export default function Layout() {
     display: "block",
     textDecoration: "none",
     color: "#0f172a",
-    fontWeight: 900,
+    fontWeight: 600,
     padding: "10px 10px",
     borderRadius: 12,
   };
@@ -261,14 +243,15 @@ export default function Layout() {
     display: "grid",
     gridTemplateColumns: "2fr 1fr 1fr",
     gap: 16,
-    minWidth: 0
+    minWidth: 0,
   };
 
-  const footerTitle: React.CSSProperties = { fontWeight: 1000 };
+  const footerTitle: React.CSSProperties = { fontWeight: 700 };
+  const footerCopy: React.CSSProperties = { marginTop: 8, color: "#475569", fontWeight: 400, lineHeight: 1.65 };
   const footerLink: React.CSSProperties = {
     color: "#0f172a",
     textDecoration: "none",
-    fontWeight: 900,
+    fontWeight: 600,
   };
 
   const creditsLabel = useMemo(() => formatMoney(creditsTotal), [creditsTotal]);
@@ -276,7 +259,7 @@ export default function Layout() {
   const mobileHrefList: Array<{ href: string; label: string }> = [
     { href: "/", label: "Home" },
     { href: "/browse", label: "Browse" },
-    { href: "/test-takers", label: "Taking a road test?" },
+    
     { href: "/mentors/start", label: "List your bike • Earn $100" },
     { href: "/dashboard", label: "Dashboard" },
     { href: "/rules", label: "Rules" },
@@ -289,24 +272,22 @@ export default function Layout() {
 
       <header style={header}>
         <div style={headerInner}>
-         {/* LOGO + (mobile-only) install */}
-<div className="bmb-brand-stack" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-  <Link to="/" style={brand} aria-label="Home">
-    <img src="/logo-borrowmybike.png" alt="BorrowMyBike" style={brandLogo} />
-  </Link>
+          <div className="bmb-brand-stack" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <Link to="/" style={brand} aria-label="BorrowMyBike home">
+              <img src="/logo-borrowmybike.png" alt="BorrowMyBike" style={brandLogo} />
+            </Link>
 
-  <div className="bmb-install-under-logo">
-    <InstallPwaButton visible />
-  </div>
-</div>
-          {/* CENTER NAV (Desktop) + Mobile menu button */}
+            <div className="bmb-install-under-logo">
+              <InstallPwaButton visible />
+            </div>
+          </div>
+
           <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minWidth: 0, gap: 10 }}>
             <nav style={nav} className="bmb-nav">
               <Link to="/" style={navLink("/")}>Home</Link>
               <Link to="/browse" style={navLink("/browse")}>Browse</Link>
-              <Link to="/test-takers" style={navLink("/test-takers")}>Taking a road test?</Link>
+              
               <Link to="/mentors/start" style={navLink("/mentors")}>List your bike • Earn $100</Link>
-
               <Link to="/dashboard" style={navLink("/dashboard")}>Dashboard</Link>
               <Link to="/rules" style={navLink("/rules")}>Rules</Link>
               <Link to="/legal" style={navLink("/legal")}>Legal</Link>
@@ -324,7 +305,6 @@ export default function Layout() {
             </button>
           </div>
 
-          {/* AUTH AREA */}
           <div style={rightArea}>
             {user ? (
               <>
@@ -333,12 +313,10 @@ export default function Layout() {
                   <button onClick={signOut} style={signOutBtn}>Sign out</button>
                 </div>
 
-                {/* Subtle credits line (global) */}
                 <div style={metaLine} title="Available credits on your account">
                   Credits: {creditsLabel}
                 </div>
 
-                {/* Subtle email line */}
                 <div style={metaLine} title={email ?? ""}>
                   {email ? `Signed in as ${email}` : "Signed in"}
                 </div>
@@ -352,9 +330,6 @@ export default function Layout() {
             )}
           </div>
 
-          
-
-          {/* Mobile dropdown panel */}
           {mobileMenuOpen && (
             <div className="bmb-mobile-menu-panel" style={mobilePanel} role="menu" aria-label="Site menu">
               {mobileHrefList.map((item) => {
@@ -372,11 +347,10 @@ export default function Layout() {
                 );
               })}
 
-              {/* Extra account actions on mobile (helpful when nav hidden) */}
               <div style={{ marginTop: 8, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
                 {user ? (
                   <div style={{ display: "grid", gap: 10 }}>
-                    <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
+                    <div style={{ fontSize: 12, color: "#64748b", fontWeight: 400 }}>
                       Credits: {creditsLabel}
                     </div>
                     <button onClick={signOut} style={{ ...signOutBtn, width: "100%" }}>Sign out</button>
@@ -399,17 +373,20 @@ export default function Layout() {
       <footer style={footer}>
         <div style={footerInner} className="bmb-footer-inner">
           <div>
-            <div style={footerTitle}>BorrowMyBike / Class6Loaner</div>
-            <div style={{ marginTop: 8, color: "#475569", fontWeight: 800 }}>
-              Road tests only. Not a rental company.
+            <div style={footerTitle}>BorrowMyBike</div>
+            <div style={footerCopy}>
+              Built for registry road tests only. Not a recreational rental platform.
               <br />
-              Launching province-by-province — mentors can list Canada-wide.
+              Launching province by province, with more cities and mentor coverage opening over time.
             </div>
-            <div style={{ marginTop: 10, color: "#475569", fontWeight: 800 }}>
-              Questions? Email{" "}
-              <span style={{ fontWeight: 1000, color: "#0f172a" }}>support@borrowmybike.ca</span>
+            <div style={footerCopy}>
+              Questions? Email <a href="mailto:support@borrowmybike.ca"
+              style={{ color: "inherit", textDecoration: "underline" }}
+              >
+                support@borrowmybike.ca
+              </a>
             </div>
-            <div style={{ marginTop: 10, color: "#94a3b8", fontWeight: 800, fontSize: 12 }}>
+            <div style={{ marginTop: 10, color: "#94a3b8", fontWeight: 400, fontSize: 12 }}>
               © {new Date().getFullYear()} BorrowMyBike. All rights reserved.
             </div>
           </div>
@@ -424,12 +401,12 @@ export default function Layout() {
           </div>
 
           <div>
-            <div style={footerTitle}>Trust</div>
+            <div style={footerTitle}>Policies</div>
             <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
-              <Link to="/rules" style={footerLink}>Rules &amp; Process</Link>
+              <Link to="/rules" style={footerLink}>Rules &amp; process</Link>
               <Link to="/rules#cancellations" style={footerLink}>Cancellation outcomes</Link>
               <Link to="/rules#fault" style={footerLink}>Fault scenarios</Link>
-              <Link to="/legal" style={footerLink}>Legal / Policies</Link>
+              <Link to="/legal" style={footerLink}>Legal / policies</Link>
             </div>
           </div>
         </div>

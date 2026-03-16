@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { sb } from "../lib/supabase";
 import { PROVINCES, provinceLabel, isProvinceEnabled, type ProvinceCode } from "../lib/provinces";
+import { getLaunchCityOptions, getMetroCities } from "../utils/metroAreas";
+import { trackEvent } from "../lib/analytics";
 
 type BikeRow = {
   id: string;
@@ -21,12 +23,20 @@ type ReviewAgg = {
   bike_rating: number | null;
 };
 
-
 type OwnerSummary = {
   id: string;
   first_name: string | null;
   years_riding: number | null;
   travel_quadrants: string[] | null;
+  base_city?: string | null;
+  service_cities?: string[] | null;
+  available_weekdays?: boolean | null;
+  available_weekends?: boolean | null;
+  available_morning?: boolean | null;
+  available_afternoon?: boolean | null;
+  available_evening?: boolean | null;
+  advance_notice_hours?: number | null;
+  availability_notes?: string | null;
 };
 
 const BUCKET = "bike-photos";
@@ -59,6 +69,78 @@ function stars(avg: number) {
   return "★★★★★☆☆☆☆☆".slice(5 - full, 10 - full);
 }
 
+function normalizeCity(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
+}
+
+function dedupeCaseInsensitive(values: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const raw of values) {
+    const value = String(raw || "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+
+  return out;
+}
+
+function formatServiceCities(owner: OwnerSummary) {
+  const cities = dedupeCaseInsensitive(
+    Array.isArray(owner.service_cities) ? owner.service_cities.filter(Boolean) : [],
+  );
+
+  if (!cities.length) return "";
+
+  if (cities.length <= 3) return cities.join(" • ");
+
+  return `${cities.slice(0, 3).join(" • ")} +${cities.length - 3} more`;
+}
+
+function formatAvailability(owner: OwnerSummary) {
+  const dayParts: string[] = [];
+  const timeParts: string[] = [];
+
+  if (owner.available_weekdays) dayParts.push("Weekdays");
+  if (owner.available_weekends) dayParts.push("Weekends");
+
+  if (owner.available_morning) timeParts.push("Mornings");
+  if (owner.available_afternoon) timeParts.push("Afternoons");
+  if (owner.available_evening) timeParts.push("Evenings");
+
+  const dayText = dayParts.length ? dayParts.join(" & ") : "";
+  const timeText = timeParts.length ? timeParts.join(" • ") : "";
+
+  if (dayText && timeText) return `${dayText} • ${timeText}`;
+  if (dayText) return dayText;
+  if (timeText) return timeText;
+  return "";
+}
+
+function formatAdvanceNotice(hours: number | null | undefined) {
+  if (hours == null || !Number.isFinite(hours)) return "";
+  if (hours === 0) return "Same day okay";
+  if (hours === 12) return "12h notice";
+  if (hours === 24) return "24h notice";
+  if (hours === 48) return "48h notice";
+  if (hours === 72) return "3 days notice";
+  if (hours === 168) return "1 week notice";
+  if (hours % 24 === 0) return `${hours / 24} days notice`;
+  return `${hours}h notice`;
+}
+
+function isUsefulNote(value: string | null | undefined) {
+  const text = (value || "").trim();
+  if (!text) return false;
+  if (text.toLowerCase() === "test") return false;
+  if (text.length < 12) return false;
+  return true;
+}
+
 export default function Browse() {
   const [bikes, setBikes] = useState<BikeRow[]>([]);
   const [reviews, setReviews] = useState<ReviewAgg[]>([]);
@@ -70,8 +152,8 @@ export default function Browse() {
   const [province, setProvince] = useState<ProvinceFilter>("All");
   const [city, setCity] = useState("All");
   const [activeOnly, setActiveOnly] = useState(true);
+  const [didTrackBrowseView, setDidTrackBrowseView] = useState(false);
 
-  // Allow deep links from the home page like /browse?province=AB&city=Calgary
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -86,11 +168,10 @@ export default function Browse() {
       if (c) {
         setCity(c);
       }
-    } catch {}
-    // run once
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch {
+      // ignore malformed query params
+    }
   }, []);
-
 
   useEffect(() => {
     let cancelled = false;
@@ -114,22 +195,16 @@ export default function Browse() {
         setErr(bRes.error.message);
         setBikes([]);
       } else {
-        // ✅ Show bikes in ALL provinces (owner-first Canada-wide)
-        setBikes(((bRes.data as BikeRow[]) || []) ?? []);
+        const bikeRows = (((bRes.data as BikeRow[]) || []) ?? []);
+        setBikes(bikeRows);
 
-        // Load mentor summaries (first name / years riding / travel quadrants) for cards
         try {
-          const ownerIds = Array.from(
-            new Set(
-              (((bRes.data as BikeRow[]) || []) ?? [])
-                .map((x) => x.owner_id)
-                .filter(Boolean),
-            ),
-          );
+          const ownerIds = Array.from(new Set(bikeRows.map((x) => x.owner_id).filter(Boolean)));
           if (ownerIds.length) {
             const fnRes = await sb.functions.invoke("get-owner-summaries", {
               body: { owner_ids: ownerIds },
             });
+
             const owners = (fnRes.data?.owners || fnRes.data || []) as OwnerSummary[];
             const map: Record<string, OwnerSummary> = {};
             for (const o of owners || []) {
@@ -175,6 +250,10 @@ export default function Browse() {
   }, [reviews]);
 
   const cityOptions = useMemo(() => {
+    if (province === "AB") {
+      return ["All", ...getLaunchCityOptions("AB")];
+    }
+
     const s = new Set<string>();
     for (const b of bikes) {
       if (!b.city) continue;
@@ -187,34 +266,62 @@ export default function Browse() {
   useEffect(() => {
     if (city === "All") return;
     if (!cityOptions.includes(city)) setCity("All");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [province, cityOptions.join("|")]);
+  }, [province, cityOptions, city]);
+
+  const metroCities = useMemo(() => {
+    if (city === "All") return [];
+    return getMetroCities(city).map((c) => c.toLowerCase());
+  }, [city]);
 
   const filteredAndSorted = useMemo(() => {
     const q = search.trim().toLowerCase();
 
     const filtered = bikes.filter((b) => {
       if (province !== "All" && b.province !== province) return false;
-      if (city !== "All" && (b.city || "") !== city) return false;
+
+      if (city !== "All") {
+        const bikeCity = normalizeCity(b.city);
+        if (!metroCities.includes(bikeCity)) return false;
+      }
 
       if (!q) return true;
 
-      const hay = `${b.make || ""} ${b.model || ""} ${b.year || ""} ${b.city || ""} ${b.province || ""}`.toLowerCase();
+      const owner = ownerSummaries[b.owner_id];
+      const ownerHay = owner
+        ? [
+            owner.first_name || "",
+            owner.base_city || "",
+            ...(owner.service_cities || []),
+            owner.availability_notes || "",
+          ].join(" ")
+        : "";
+
+      const hay =
+        `${b.make || ""} ${b.model || ""} ${b.year || ""} ${b.city || ""} ${b.province || ""} ${ownerHay}`.toLowerCase();
+
       return hay.includes(q);
     });
 
-    // Prefer matching filters first, then rating, then title
     const wantProvince = province !== "All" ? province : null;
-    const wantCity = city !== "All" ? city : null;
+    const wantCity = city !== "All" ? normalizeCity(city) : null;
 
     function bucket(b: BikeRow) {
+      const bikeCity = normalizeCity(b.city);
+      const exactCity = !!wantCity && bikeCity === wantCity;
+      const metroMatch = !!wantCity && metroCities.includes(bikeCity);
+
       if (wantProvince && wantCity) {
-        if (b.province === wantProvince && (b.city || "") === wantCity) return 0;
-        if (b.province === wantProvince) return 1;
-        return 2;
+        if (b.province === wantProvince && exactCity) return 0;
+        if (b.province === wantProvince && metroMatch) return 1;
+        if (b.province === wantProvince) return 2;
+        return 3;
       }
       if (wantProvince) return b.province === wantProvince ? 0 : 1;
-      if (wantCity) return (b.city || "") === wantCity ? 0 : 1;
+      if (wantCity) {
+        if (exactCity) return 0;
+        if (metroMatch) return 1;
+        return 2;
+      }
       return 0;
     }
 
@@ -231,15 +338,36 @@ export default function Browse() {
 
       return titleOf(a).localeCompare(titleOf(b));
     });
-  }, [bikes, search, city, province, ratingByBikeId]);
+  }, [bikes, search, city, province, ratingByBikeId, metroCities, ownerSummaries]);
+
+  useEffect(() => {
+    if (loading || didTrackBrowseView) return;
+
+    trackEvent("browse_page_viewed", {
+      province_filter: province,
+      city_filter: city,
+      active_only: activeOnly,
+      listing_count: filteredAndSorted.length,
+      search_query_present: !!search.trim(),
+    });
+    setDidTrackBrowseView(true);
+  }, [loading, didTrackBrowseView, province, city, activeOnly, filteredAndSorted.length, search]);
 
   return (
     <div style={{ maxWidth: 1120, margin: "0 auto", padding: "10px 0" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
           <h1 style={{ margin: 0 }}>Browse bikes</h1>
           <div style={{ marginTop: 6, color: "#64748b", fontWeight: 750 }}>
-            Mentors can list Canada-wide. Booking opens province-by-province.
+            Find road-test-ready bikes in your area. Major city searches include nearby surrounding communities.
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -276,7 +404,6 @@ export default function Browse() {
         </div>
       )}
 
-      {/* Filters */}
       <div
         style={{
           marginTop: 14,
@@ -295,7 +422,9 @@ export default function Browse() {
           }}
         >
           <div>
-            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>Search</div>
+            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>
+              Search
+            </div>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -312,7 +441,9 @@ export default function Browse() {
           </div>
 
           <div>
-            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>Province</div>
+            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>
+              Province
+            </div>
             <select
               value={province}
               onChange={(e) => setProvince(e.target.value as ProvinceFilter)}
@@ -337,7 +468,9 @@ export default function Browse() {
           </div>
 
           <div>
-            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>City</div>
+            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>
+              City
+            </div>
             <select
               value={city}
               onChange={(e) => setCity(e.target.value)}
@@ -360,8 +493,18 @@ export default function Browse() {
           </div>
 
           <div>
-            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>Active only</div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800, color: "#0f172a" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 6, color: "#0f172a" }}>
+              Active only
+            </div>
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                fontWeight: 800,
+                color: "#0f172a",
+              }}
+            >
               <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
               Yes
             </label>
@@ -380,6 +523,8 @@ export default function Browse() {
 
       <div style={{ marginTop: 12, color: "#64748b", fontWeight: 750, fontSize: 13 }}>
         {filteredAndSorted.length} bike(s)
+        {city !== "All" ? ` near ${city}` : ""}
+        {province !== "All" ? ` in ${provinceLabel(province)}` : ""}
       </div>
 
       {loading ? (
@@ -396,24 +541,53 @@ export default function Browse() {
             fontWeight: 850,
           }}
         >
-          No bikes match your filters.
+          No bikes listed here yet.
           <div style={{ marginTop: 6, color: "#64748b", fontWeight: 750 }}>
-            Try a different province/city, or clear the search.
+            We’re expanding across Alberta. If you have a road-test-ready bike, you can be one of the first mentors in this area and earn about $100 per road test.
           </div>
         </div>
       ) : (
-        <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+        <div
+          style={{
+            marginTop: 14,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+            gap: 18,
+          }}
+        >
           {filteredAndSorted.map((b) => {
             const img = coverUrl(b.owner_id, b.id);
             const agg = ratingByBikeId.get(b.id);
             const avg = agg && agg.count ? agg.sum / agg.count : null;
-
+            const owner = ownerSummaries[b.owner_id];
             const bookingEnabled = b.province ? isProvinceEnabled(b.province) : false;
+
+            const mentorName = (owner?.first_name || "").trim();
+            const mentorYears =
+              owner?.years_riding != null && Number.isFinite(owner.years_riding)
+                ? `${owner.years_riding} yrs riding`
+                : "";
+
+            const serviceCitiesText = owner ? formatServiceCities(owner) : "";
+            const availabilityText = owner ? formatAvailability(owner) : "";
+            const noticeText = owner ? formatAdvanceNotice(owner.advance_notice_hours) : "";
+            const notesText = (owner?.availability_notes || "").trim();
+            const showNotes = isUsefulNote(notesText);
 
             return (
               <Link
                 key={b.id}
                 to={`/bikes/${b.id}`}
+                onClick={() => {
+                  trackEvent("bike_card_clicked", {
+                    bike_id: b.id,
+                    bike_title: titleOf(b),
+                    province: b.province || "",
+                    city: b.city || "",
+                    booking_enabled: bookingEnabled,
+                    has_reviews: avg != null,
+                  });
+                }}
                 style={{
                   textDecoration: "none",
                   color: "inherit",
@@ -426,14 +600,14 @@ export default function Browse() {
                   transition: "transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease",
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLAnchorElement).style.transform = "translateY(-1px)";
-                  (e.currentTarget as HTMLAnchorElement).style.boxShadow = "0 14px 30px rgba(0,0,0,0.08)";
-                  (e.currentTarget as HTMLAnchorElement).style.borderColor = "rgba(15,23,42,0.16)";
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                  e.currentTarget.style.boxShadow = "0 14px 30px rgba(0,0,0,0.08)";
+                  e.currentTarget.style.borderColor = "rgba(15,23,42,0.16)";
                 }}
                 onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLAnchorElement).style.transform = "translateY(0)";
-                  (e.currentTarget as HTMLAnchorElement).style.boxShadow = "0 2px 12px rgba(0,0,0,0.04)";
-                  (e.currentTarget as HTMLAnchorElement).style.borderColor = "#e8edf6";
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.04)";
+                  e.currentTarget.style.borderColor = "#e8edf6";
                 }}
               >
                 <div style={{ width: "100%", height: 180, background: "#eef2f8", position: "relative" }}>
@@ -463,8 +637,15 @@ export default function Browse() {
                   ) : null}
                 </div>
 
-                <div style={{ padding: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                <div style={{ padding: 15 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      alignItems: "baseline",
+                    }}
+                  >
                     <div style={{ fontSize: 16, fontWeight: 950, color: "#0f172a" }}>{titleOf(b)}</div>
 
                     {avg == null ? (
@@ -500,28 +681,124 @@ export default function Browse() {
                     )}
                   </div>
 
-                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>
-                    {shortMeta(b)}
-                  </div>
+                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>{shortMeta(b)}</div>
 
-                  {(() => {
-                    const o = ownerSummaries[b.owner_id];
-                    if (!o) return null;
-                    const name = (o.first_name || "").trim();
-                    const yrs = o.years_riding != null ? `${o.years_riding} yrs` : "";
-                    const travel = Array.isArray(o.travel_quadrants) && o.travel_quadrants.length
-                      ? `Will travel: ${o.travel_quadrants.join(", ")}`
-                      : "";
-                    if (!name && !yrs && !travel) return null;
-                    return (
-                      <div style={{ marginTop: 6, color: "#334155", fontWeight: 800, fontSize: 13 }}>
-                        {name ? `Mentor: ${name}` : "Mentor"}{yrs ? ` • ${yrs}` : ""}
-                        {travel ? <div style={{ marginTop: 2, color: "#64748b", fontWeight: 800 }}>{travel}</div> : null}
-                      </div>
-                    );
-                  })()}
+                 {owner ? (
+  <div
+    style={{
+      marginTop: 10,
+      padding: 12,
+      borderRadius: 14,
+      border: "none",
+      background: "#fbfdff",
+    }}
+  >
+    <div style={{ color: "#0f172a", fontWeight: 950, fontSize: 15 }}>
+      {mentorName || "Mentor"}
+    </div>
 
-                  <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div style={{ marginTop: 2, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+     {mentorYears ? `${mentorYears} riding` : "Mentor"}
+    </div>
+
+    {serviceCitiesText ? (
+      <div style={{ marginTop: 10 }}>
+        <div
+          style={{
+            color: "#64748b",
+            fontWeight: 700,
+            fontSize: 11,
+            letterSpacing: ".03em",
+          }}
+        >
+          Serves
+        </div>
+        <div style={{ marginTop: 2, color: "#1e293b", fontWeight: 750, fontSize: 13, lineHeight: 1.4 }}>
+          {serviceCitiesText}
+        </div>
+      </div>
+    ) : null}
+
+    {availabilityText ? (
+      <div style={{ marginTop: 8 }}>
+        <div
+          style={{
+            color: "#64748b",
+            fontWeight: 700,
+            fontSize: 11,
+            letterSpacing: ".03em",
+          }}
+        >
+          Available
+        </div>
+        <div style={{ marginTop: 2, color: "#334155", fontWeight: 750, fontSize: 13, lineHeight: 1.4 }}>
+          {availabilityText}
+        </div>
+      </div>
+    ) : null}
+
+    {noticeText ? (
+      <div style={{ marginTop: 8 }}>
+        <div
+          style={{
+            color: "#64748b",
+            fontWeight: 700,
+            fontSize: 11,
+            letterSpacing: ".03em",
+          }}
+        >
+          Notice
+        </div>
+        <div style={{ marginTop: 2, color: "#334155", fontWeight: 750, fontSize: 13 }}>
+          {noticeText}
+        </div>
+      </div>
+    ) : null}
+
+    {Array.isArray(owner.travel_quadrants) && owner.travel_quadrants.length ? (
+      <div style={{ marginTop: 8 }}>
+        <div
+          style={{
+            color: "#94a3b8",
+            fontWeight: 700,
+            fontSize: 11,
+            letterSpacing: ".03em",
+          }}
+        >
+          Comfort zones
+        </div>
+        <div style={{ marginTop: 2, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
+          {owner.travel_quadrants.join(" • ")}
+        </div>
+      </div>
+    ) : null}
+
+    {showNotes ? (
+      <div
+        style={{
+          marginTop: 10,
+          paddingTop: 8,
+          borderTop: "1px solid #e2e8f0",
+          color: "#64748b",
+          fontWeight: 750,
+          fontSize: 12,
+          lineHeight: 1.45,
+        }}
+      >
+        {notesText}
+      </div>
+    ) : null}
+  </div>
+) : null}
+
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
                     <div style={{ color: "#475569", fontWeight: 800, fontSize: 13 }}>
                       {b.is_active ? "Active listing" : "Inactive"}
                     </div>

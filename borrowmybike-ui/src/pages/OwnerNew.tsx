@@ -5,6 +5,7 @@ import { sb } from "../lib/supabase";
 import { useAuth } from "../auth/useAuth";
 import { PROVINCES, type ProvinceCode } from "../lib/provinces";
 import { callFn } from "../lib/fn";
+import { getBaseCityOptions, getServiceCitiesForBaseCity } from "../utils/metroAreas";
 
 type Bike = {
   id: string;
@@ -18,9 +19,34 @@ type Bike = {
   is_active: boolean;
 };
 
-const BUCKET = "bike-photos";
+type OwnerSummary = {
+  id: string;
+  first_name?: string | null;
+  years_riding?: number | null;
+  travel_quadrants?: string[] | null;
+  base_city?: string | null;
+  service_cities?: string[] | null;
+  available_weekdays?: boolean | null;
+  available_weekends?: boolean | null;
+  available_morning?: boolean | null;
+  available_afternoon?: boolean | null;
+  available_evening?: boolean | null;
+  advance_notice_hours?: number | null;
+  availability_notes?: string | null;
+};
 
-// Cache-bust helper (forces UI to load newest cover.webp after replacing file at same path)
+const BUCKET = "bike-photos";
+const QUADRANTS = ["NE", "NW", "SE", "SW"] as const;
+
+const NOTICE_OPTIONS = [
+  { value: "0", label: "Same day is okay" },
+  { value: "12", label: "12 hours notice" },
+  { value: "24", label: "24 hours notice" },
+  { value: "48", label: "48 hours notice" },
+  { value: "72", label: "3 days notice" },
+  { value: "168", label: "1 week notice" },
+];
+
 function coverVersionKey(bikeId: string) {
   return `bike_cover_v_${bikeId}`;
 }
@@ -68,6 +94,27 @@ async function fileToWebp(file: File, maxW = 1400, maxH = 1400, quality = 0.82):
   return blob;
 }
 
+function dedupeCaseInsensitive(values: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+
+  return out;
+}
+
+function withoutBaseCity(values: string[], baseCity: string) {
+  const base = baseCity.trim().toLowerCase();
+  return dedupeCaseInsensitive(values).filter((x) => x.trim().toLowerCase() !== base);
+}
+
 export default function OwnerNew() {
   const nav = useNavigate();
   const { user } = useAuth();
@@ -81,15 +128,23 @@ export default function OwnerNew() {
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
   const [year, setYear] = useState<string>("");
-  const [engineSize, setEngineSize] = useState<string>("" )
+  const [engineSize, setEngineSize] = useState<string>("");
   const [city, setCity] = useState("");
-  const [province, setProvince] = useState<string>(""); // force selection
+  const [province, setProvince] = useState<string>("");
   const [active, setActive] = useState(true);
 
-  // Mentor profile (stored on users table)
   const [firstName, setFirstName] = useState("");
   const [yearsRiding, setYearsRiding] = useState<string>("");
   const [travelQuadrants, setTravelQuadrants] = useState<string[]>(["NE", "NW", "SE", "SW"]);
+  const [baseCity, setBaseCity] = useState("");
+  const [serviceCities, setServiceCities] = useState<string[]>([]);
+  const [availableWeekdays, setAvailableWeekdays] = useState(false);
+  const [availableWeekends, setAvailableWeekends] = useState(false);
+  const [availableMorning, setAvailableMorning] = useState(false);
+  const [availableAfternoon, setAvailableAfternoon] = useState(false);
+  const [availableEvening, setAvailableEvening] = useState(false);
+  const [advanceNoticeHours, setAdvanceNoticeHours] = useState<string>("24");
+  const [availabilityNotes, setAvailabilityNotes] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
 
@@ -102,6 +157,9 @@ export default function OwnerNew() {
     return coverUrl(me, bike.id);
   }, [bike, me]);
 
+  const baseCityOptions = useMemo(() => getBaseCityOptions("AB"), []);
+  const serviceCityOptions = useMemo(() => getServiceCitiesForBaseCity(baseCity), [baseCity]);
+
   useEffect(() => {
     if (!me) return;
 
@@ -109,22 +167,40 @@ export default function OwnerNew() {
       setLoading(true);
       setErr(null);
 
-      // Load mentor profile (safe minimal fields) via Edge Function
       try {
-        const prof = await callFn<{ owners: Array<{ id: string; first_name?: string | null; years_riding?: number | null; travel_quadrants?: string[] | null }> }>(
-          "get-owner-summaries",
-          { owner_ids: [me] },
-        );
+        const prof = await callFn<{ owners: OwnerSummary[] }>("get-owner-summaries", {
+          owner_ids: [me],
+        });
+
         if (prof.ok && prof.data?.owners?.[0]) {
           const o = prof.data.owners[0];
-          setFirstName((o.first_name ?? "") as string);
+
+          setFirstName(o.first_name ?? "");
           setYearsRiding(o.years_riding != null ? String(o.years_riding) : "");
+
           if (Array.isArray(o.travel_quadrants) && o.travel_quadrants.length) {
-            setTravelQuadrants(o.travel_quadrants as string[]);
+            setTravelQuadrants(o.travel_quadrants);
           }
+
+          const loadedBaseCity = o.base_city ?? "";
+          setBaseCity(loadedBaseCity);
+
+          if (Array.isArray(o.service_cities)) {
+            setServiceCities(withoutBaseCity(o.service_cities, loadedBaseCity));
+          }
+
+          setAvailableWeekdays(!!o.available_weekdays);
+          setAvailableWeekends(!!o.available_weekends);
+          setAvailableMorning(!!o.available_morning);
+          setAvailableAfternoon(!!o.available_afternoon);
+          setAvailableEvening(!!o.available_evening);
+          setAdvanceNoticeHours(
+            o.advance_notice_hours != null ? String(o.advance_notice_hours) : "24",
+          );
+          setAvailabilityNotes(o.availability_notes ?? "");
         }
       } catch {
-        // ignore profile load errors (bike onboarding is primary)
+        // ignore profile load errors
       }
 
       const res = await sb
@@ -148,12 +224,11 @@ export default function OwnerNew() {
         setMake(b.make || "");
         setModel(b.model || "");
         setYear(b.year ? String(b.year) : "");
-        setEngineSize((b as any).engine_size != null ? String((b as any).engine_size) : "");
+        setEngineSize((b as Bike).engine_size != null ? String((b as Bike).engine_size) : "");
         setCity(b.city || "");
         setProvince(b.province || "");
         setActive(!!b.is_active);
       } else {
-        // no bike yet -> force province selection before save
         setProvince("");
         setEngineSize("");
       }
@@ -162,35 +237,89 @@ export default function OwnerNew() {
     })();
   }, [me]);
 
-  async function saveMentorProfile() {
-    if (!me) return;
-    setProfileMsg(null);
-
-    const fn = firstName.trim();
-    if (!fn) {
-      setProfileMsg("Please enter your first name.");
+  useEffect(() => {
+    if (!baseCity) {
+      setServiceCities([]);
       return;
     }
+
+    const allowed = new Set(getServiceCitiesForBaseCity(baseCity).map((c) => c.toLowerCase()));
+    setServiceCities((prev) => prev.filter((city) => allowed.has(city.toLowerCase())));
+  }, [baseCity]);
+
+  function validateMentorProfileOrThrow() {
+    const fn = firstName.trim();
+    if (!fn) throw new Error("Please enter your first name.");
 
     const yrs = yearsRiding.trim() ? Number(yearsRiding.trim()) : null;
     if (yearsRiding.trim() && (!Number.isFinite(yrs) || yrs! < 0 || yrs! > 60)) {
-      setProfileMsg("Years riding must be a number between 0 and 60.");
-      return;
+      throw new Error("Years riding must be a number between 0 and 60.");
+    }
+
+    const base = baseCity.trim();
+    if (!base) throw new Error("Please choose your base city.");
+
+    const allowedServiceCities = getServiceCitiesForBaseCity(base);
+    const allowedSet = new Set(allowedServiceCities.map((x) => x.toLowerCase()));
+    const cleanedServiceCities = withoutBaseCity(serviceCities, base).filter((x) =>
+      allowedSet.has(x.toLowerCase()),
+    );
+
+    if (!cleanedServiceCities.length) {
+      throw new Error("Please select at least one nearby service city.");
+    }
+
+    if (!availableWeekdays && !availableWeekends) {
+      throw new Error("Please choose whether you’re generally available on weekdays and/or weekends.");
+    }
+
+    if (!availableMorning && !availableAfternoon && !availableEvening) {
+      throw new Error("Please choose at least one time of day you’re generally available.");
+    }
+
+    const notice = advanceNoticeHours.trim() ? Number(advanceNoticeHours.trim()) : null;
+    if (notice === null || !Number.isFinite(notice) || notice < 0 || notice > 336) {
+      throw new Error("Please choose a valid advance notice preference.");
     }
 
     if (!travelQuadrants.length) {
-      setProfileMsg("Pick at least one quadrant you’re willing to travel to.");
-      return;
+      throw new Error("Pick at least one quadrant you’re willing to travel to.");
     }
+  }
 
+  async function persistMentorProfile() {
+    const fn = firstName.trim();
+    const yrs = yearsRiding.trim() ? Number(yearsRiding.trim()) : null;
+    const base = baseCity.trim();
+    const cleanedServiceCities = withoutBaseCity(serviceCities, base);
+
+    const res = await callFn("update-my-profile", {
+      first_name: fn.slice(0, 50),
+      years_riding: yrs,
+      travel_quadrants: travelQuadrants,
+      base_city: base.slice(0, 80),
+      service_cities: cleanedServiceCities.map((x) => x.slice(0, 80)),
+      available_weekdays: availableWeekdays,
+      available_weekends: availableWeekends,
+      available_morning: availableMorning,
+      available_afternoon: availableAfternoon,
+      available_evening: availableEvening,
+      advance_notice_hours: Number(advanceNoticeHours),
+      availability_notes: availabilityNotes.trim().slice(0, 500),
+    });
+
+    if (!res.ok) throw new Error(res.error || "Profile update failed");
+    setServiceCities(cleanedServiceCities);
+  }
+
+  async function saveMentorProfile() {
+    if (!me) return;
+    setProfileMsg(null);
     setSavingProfile(true);
+
     try {
-      const res = await callFn("update-my-profile", {
-        first_name: fn.slice(0, 50),
-        years_riding: yrs,
-        travel_quadrants: travelQuadrants,
-      });
-      if (!res.ok) throw new Error(res.error || "Profile update failed");
+      validateMentorProfileOrThrow();
+      await persistMentorProfile();
       setProfileMsg("Saved ✅");
     } catch (e: any) {
       setProfileMsg(e?.message || "Profile update failed");
@@ -203,15 +332,13 @@ export default function OwnerNew() {
     setFile(f);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(f ? URL.createObjectURL(f) : null);
-  }  function validateProvinceOrThrow() {
-    // ✅ Option A: allow listing in ALL provinces. Only require selection.
-    if (!province) {
-      throw new Error("Please select a province.");
-    }
+  }
+
+  function validateProvinceOrThrow() {
+    if (!province) throw new Error("Please select a province.");
   }
 
   function validateRequiredBikeFieldsOrThrow() {
-    // Make required fields explicit so mentors can't accidentally create an incomplete listing.
     const mk = make.trim();
     const md = model.trim();
     const ct = city.trim();
@@ -235,10 +362,8 @@ export default function OwnerNew() {
     validateProvinceOrThrow();
     validateRequiredBikeFieldsOrThrow();
 
-    // If already exists, return it
     if (bike) return bike;
 
-    // Otherwise create a placeholder row (one bike per owner for MVP)
     const insertRes = await sb
       .from("bikes")
       .insert({
@@ -266,7 +391,6 @@ export default function OwnerNew() {
     setErr(null);
 
     const webp = await fileToWebp(f);
-
     const path = `${ownerId}/${bikeId}/cover.webp`;
 
     const up = await sb.storage.from(BUCKET).upload(path, webp, {
@@ -292,6 +416,10 @@ export default function OwnerNew() {
 
       setSaving(true);
       setErr(null);
+      setProfileMsg(null);
+
+      validateMentorProfileOrThrow();
+      await persistMentorProfile();
 
       validateProvinceOrThrow();
       validateRequiredBikeFieldsOrThrow();
@@ -304,7 +432,7 @@ export default function OwnerNew() {
           make: make || null,
           model: model || null,
           year: year ? Number(year) : null,
-        engine_size: engineSize ? Number(engineSize) : null,
+          engine_size: engineSize ? Number(engineSize) : null,
           city: city || null,
           province: province as ProvinceCode,
           is_active: active,
@@ -383,7 +511,15 @@ export default function OwnerNew() {
 
   return (
     <div style={page}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
           <h1 style={{ margin: 0 }}>Edit bike</h1>
           <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>
@@ -402,28 +538,59 @@ export default function OwnerNew() {
       </div>
 
       {err && (
-        <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #fecaca", background: "#fff1f2" }}>
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: 12,
+            border: "1px solid #fecaca",
+            background: "#fff1f2",
+          }}
+        >
           <div style={{ fontWeight: 450, color: "#b00020" }}>Error</div>
           <div style={{ marginTop: 6, color: "#7f1d1d", fontWeight: 450 }}>{err}</div>
         </div>
       )}
 
       <div style={card}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <div style={{ fontWeight: 900, fontSize: 16 }}>Mentor profile</div>
-          <div style={{ color: "#64748b", fontWeight: 650, fontSize: 13 }}>Shown to test‑takers</div>
+          <div style={{ color: "#64748b", fontWeight: 650, fontSize: 13 }}>
+            Shown to test-takers
+          </div>
         </div>
 
         <details style={{ marginTop: 10 }}>
-          <summary style={{ cursor: "pointer", fontWeight: 800, color: "#0f172a" }}>Why we ask this</summary>
+          <summary style={{ cursor: "pointer", fontWeight: 800, color: "#0f172a" }}>
+            Why we ask this
+          </summary>
           <div style={{ marginTop: 8, color: "#64748b", fontWeight: 650 }}>
-            A short public profile builds trust and helps you accept the right requests (without sharing private details).
+            Borrowers already have their road test booked. This profile helps them quickly decide
+            whether your bike is realistically a fit for their date, area, and timing without sharing
+            private information.
           </div>
         </details>
 
-        <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+        <div
+          style={{
+            marginTop: 14,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12,
+          }}
+        >
           <div>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>First name</div>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              First name <span style={{ color: "#b00020" }}>*</span>
+            </div>
             <input
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
@@ -433,7 +600,9 @@ export default function OwnerNew() {
           </div>
 
           <div>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Years riding</div>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Years riding <span style={{ color: "#b00020" }}>*</span>
+            </div>
             <input
               value={yearsRiding}
               onChange={(e) => setYearsRiding(e.target.value)}
@@ -443,13 +612,123 @@ export default function OwnerNew() {
             />
           </div>
 
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Base city <span style={{ color: "#b00020" }}>*</span>
+            </div>
+            <select
+              value={baseCity}
+              onChange={(e) => setBaseCity(e.target.value)}
+              style={{
+                width: "100%",
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                background: "white",
+              }}
+            >
+              <option value="">Select your base city…</option>
+              {baseCityOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Advance notice preferred <span style={{ color: "#b00020" }}>*</span>
+            </div>
+            <select
+              value={advanceNoticeHours}
+              onChange={(e) => setAdvanceNoticeHours(e.target.value)}
+              style={{
+                width: "100%",
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                background: "white",
+              }}
+            >
+              {NOTICE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div style={{ gridColumn: "1 / -1" }}>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Where you’ll travel (quadrants)</div>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Nearby service cities <span style={{ color: "#b00020" }}>*</span>
+            </div>
+
+            {!baseCity ? (
+              <div style={{ color: "#64748b", fontWeight: 650 }}>
+                Choose your base city first.
+              </div>
+            ) : serviceCityOptions.length === 0 ? (
+              <div style={{ color: "#64748b", fontWeight: 650 }}>
+                No nearby service cities configured for that base city yet.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {serviceCityOptions.map((opt) => {
+                    const checked = serviceCities.some((x) => x.toLowerCase() === opt.toLowerCase());
+                    return (
+                      <label
+                        key={opt}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          fontWeight: 750,
+                          color: "#0f172a",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setServiceCities((prev) => {
+                              const next = on ? [...prev, opt] : prev.filter((x) => x !== opt);
+                              return withoutBaseCity(next, baseCity);
+                            });
+                          }}
+                        />
+                        {opt}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: 8, color: "#64748b", fontWeight: 650, fontSize: 13 }}>
+                  Only nearby communities tied to your base city are shown here.
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Large-city travel areas <span style={{ color: "#b00020" }}>*</span>
+            </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {(["NE", "NW", "SE", "SW"] as const).map((q) => {
+              {QUADRANTS.map((q) => {
                 const checked = travelQuadrants.includes(q);
                 return (
-                  <label key={q} style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 850, color: "#0f172a" }}>
+                  <label
+                    key={q}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontWeight: 850,
+                      color: "#0f172a",
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={checked}
@@ -469,7 +748,83 @@ export default function OwnerNew() {
               })}
             </div>
             <div style={{ marginTop: 8, color: "#64748b", fontWeight: 650, fontSize: 13 }}>
-              Tip: pick the areas you’re genuinely comfortable meeting in.
+              Keep this for Calgary/Edmonton inner-city comfort zones.
+            </div>
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Generally available <span style={{ color: "#b00020" }}>*</span>
+            </div>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 750 }}>
+                <input
+                  type="checkbox"
+                  checked={availableWeekdays}
+                  onChange={(e) => setAvailableWeekdays(e.target.checked)}
+                />
+                Weekdays
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 750 }}>
+                <input
+                  type="checkbox"
+                  checked={availableWeekends}
+                  onChange={(e) => setAvailableWeekends(e.target.checked)}
+                />
+                Weekends
+              </label>
+            </div>
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Time of day you’re usually open to <span style={{ color: "#b00020" }}>*</span>
+            </div>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 750 }}>
+                <input
+                  type="checkbox"
+                  checked={availableMorning}
+                  onChange={(e) => setAvailableMorning(e.target.checked)}
+                />
+                Mornings
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 750 }}>
+                <input
+                  type="checkbox"
+                  checked={availableAfternoon}
+                  onChange={(e) => setAvailableAfternoon(e.target.checked)}
+                />
+                Afternoons
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 750 }}>
+                <input
+                  type="checkbox"
+                  checked={availableEvening}
+                  onChange={(e) => setAvailableEvening(e.target.checked)}
+                />
+                Evenings
+              </label>
+            </div>
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Availability notes</div>
+            <textarea
+              value={availabilityNotes}
+              onChange={(e) => setAvailabilityNotes(e.target.value)}
+              rows={4}
+              placeholder="e.g., Usually easier on weekends. Downtown Calgary is easiest for me. 48h notice is appreciated."
+              style={{
+                width: "100%",
+                padding: 10,
+                borderRadius: 12,
+                border: "1px solid #e2e8f0",
+                resize: "vertical",
+              }}
+            />
+            <div style={{ marginTop: 8, color: "#64748b", fontWeight: 650, fontSize: 13 }}>
+              Keep it practical. This is meant to help the borrower decide quickly.
             </div>
           </div>
         </div>
@@ -491,7 +846,16 @@ export default function OwnerNew() {
           >
             {savingProfile ? "Saving…" : "Save profile"}
           </button>
-          {profileMsg ? <div style={{ fontWeight: 850, color: profileMsg.includes("✅") ? "#166534" : "#b00020" }}>{profileMsg}</div> : null}
+          {profileMsg ? (
+            <div
+              style={{
+                fontWeight: 850,
+                color: profileMsg.includes("✅") ? "#166534" : "#b00020",
+              }}
+            >
+              {profileMsg}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -499,26 +863,54 @@ export default function OwnerNew() {
         <div style={{ fontWeight: 850, fontSize: 16 }}>
           {bike ? `${bike.year || ""} ${bike.make || ""} ${bike.model || ""}`.trim() || "Your bike" : "Your bike"}
         </div>
-        <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>This is what borrowers see.</div>
+        <div style={{ marginTop: 6, color: "#64748b", fontWeight: 450 }}>
+          This is what borrowers see.
+        </div>
 
         {loading ? (
           <div style={{ marginTop: 12, color: "#64748b", fontWeight: 450 }}>Loading…</div>
         ) : (
           <>
-            <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div
+              style={{
+                marginTop: 14,
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
               <div>
-                <div style={{ fontWeight: 450, marginBottom: 6 }}>Make <span style={{ color: "#b00020" }}>*</span></div>
-                <input value={make} onChange={(e) => setMake(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>
+                  Make <span style={{ color: "#b00020" }}>*</span>
+                </div>
+                <input
+                  value={make}
+                  onChange={(e) => setMake(e.target.value)}
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }}
+                />
               </div>
 
               <div>
-                <div style={{ fontWeight: 450, marginBottom: 6 }}>Model <span style={{ color: "#b00020" }}>*</span></div>
-                <input value={model} onChange={(e) => setModel(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>
+                  Model <span style={{ color: "#b00020" }}>*</span>
+                </div>
+                <input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }}
+                />
               </div>
 
               <div>
-                <div style={{ fontWeight: 450, marginBottom: 6 }}>Year <span style={{ color: "#b00020" }}>*</span></div>
-                <input value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>
+                  Year <span style={{ color: "#b00020" }}>*</span>
+                </div>
+                <input
+                  value={year}
+                  onChange={(e) => setYear(e.target.value)}
+                  inputMode="numeric"
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }}
+                />
               </div>
 
               <div>
@@ -534,10 +926,15 @@ export default function OwnerNew() {
                 />
               </div>
 
-
               <div>
-                <div style={{ fontWeight: 450, marginBottom: 6 }}>City <span style={{ color: "#b00020" }}>*</span></div>
-                <input value={city} onChange={(e) => setCity(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }} />
+                <div style={{ fontWeight: 450, marginBottom: 6 }}>
+                  City <span style={{ color: "#b00020" }}>*</span>
+                </div>
+                <input
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0" }}
+                />
               </div>
 
               <div style={{ gridColumn: "1 / -1" }}>
@@ -547,7 +944,14 @@ export default function OwnerNew() {
                 <select
                   value={province}
                   onChange={(e) => setProvince(e.target.value)}
-                  style={{ width: "100%", padding: 10, borderRadius: 12, border: "1px solid #e2e8f0", background: "white", fontWeight: 450 }}
+                  style={{
+                    width: "100%",
+                    padding: 10,
+                    borderRadius: 12,
+                    border: "1px solid #e2e8f0",
+                    background: "white",
+                    fontWeight: 450,
+                  }}
                 >
                   <option value="" disabled>
                     Select province…
@@ -561,7 +965,9 @@ export default function OwnerNew() {
                 </select>
 
                 <details style={{ marginTop: 10 }}>
-                  <summary style={{ cursor: "pointer", color: "#64748b", fontWeight: 650, fontSize: 13 }}>How province availability works</summary>
+                  <summary style={{ cursor: "pointer", color: "#64748b", fontWeight: 650, fontSize: 13 }}>
+                    How province availability works
+                  </summary>
                   <div style={{ marginTop: 8, color: "#64748b", fontWeight: 450, fontSize: 13 }}>
                     You can list in any province. If it’s marked “coming soon”, borrowers can see your listing but can’t book until launch.
                   </div>
@@ -570,7 +976,12 @@ export default function OwnerNew() {
             </div>
 
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
-              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} id="active" />
+              <input
+                type="checkbox"
+                checked={active}
+                onChange={(e) => setActive(e.target.checked)}
+                id="active"
+              />
               <label htmlFor="active" style={{ fontWeight: 450 }}>
                 Active listing (show in Browse)
               </label>
@@ -597,21 +1008,46 @@ export default function OwnerNew() {
                 }}
               >
                 {previewUrl ? (
-                  <img src={previewUrl} alt="Preview" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+                  <img
+                    src={previewUrl}
+                    alt="Preview"
+                    style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+                  />
                 ) : bike && cover ? (
-                  <img src={cover} alt="Cover" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+                  <img
+                    src={cover}
+                    alt="Cover"
+                    style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+                  />
                 ) : (
-                  <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", color: "#64748b", fontWeight: 450 }}>
+                  <div
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      display: "grid",
+                      placeItems: "center",
+                      color: "#64748b",
+                      fontWeight: 450,
+                    }}
+                  >
                     No photo yet
                   </div>
                 )}
               </div>
 
               <div style={{ marginTop: 10 }}>
-                <input type="file" accept="image/*" onChange={(e) => onPickFile(e.target.files?.[0] || null)} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => onPickFile(e.target.files?.[0] || null)}
+                />
               </div>
 
-              {uploading && <div style={{ marginTop: 8, color: "#64748b", fontWeight: 450 }}>Uploading photo…</div>}
+              {uploading && (
+                <div style={{ marginTop: 8, color: "#64748b", fontWeight: 450 }}>
+                  Uploading photo…
+                </div>
+              )}
             </div>
 
             <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -629,4 +1065,3 @@ export default function OwnerNew() {
     </div>
   );
 }
- 

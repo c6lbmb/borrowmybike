@@ -6,7 +6,15 @@ import { PROVINCES, isProvinceEnabled, provinceLabel, type ProvinceCode } from "
 type CityDef = { slug: string; name: string };
 
 const CITY_OPTIONS: Record<ProvinceCode, CityDef[]> = {
-  AB: [{ slug: "calgary", name: "Calgary" }],
+  AB: [
+    { slug: "calgary", name: "Calgary" },
+    { slug: "edmonton", name: "Edmonton" },
+    { slug: "red-deer", name: "Red Deer" },
+    { slug: "lethbridge", name: "Lethbridge" },
+    { slug: "medicine-hat", name: "Medicine Hat" },
+    { slug: "grande-prairie", name: "Grande Prairie" },
+    { slug: "fort-mcmurray", name: "Fort McMurray" },
+  ],
   BC: [],
   SK: [],
   MB: [],
@@ -22,7 +30,6 @@ const CITY_OPTIONS: Record<ProvinceCode, CityDef[]> = {
 };
 
 export default function Home() {
-  // Keep these as strings to match how bikes store city/province today
   const [prov, setProv] = useState<ProvinceCode | "">("AB");
   const [city, setCity] = useState<string>("calgary");
 
@@ -38,7 +45,6 @@ export default function Home() {
     return found?.name ?? (city ? city : "");
   }, [city, cityOptions]);
 
-  // Layout tokens (match the calm C6L vibe)
   const page: React.CSSProperties = {
     maxWidth: 1280,
     margin: "0 auto",
@@ -65,55 +71,56 @@ export default function Home() {
 
   const heroBg: React.CSSProperties = {
     position: "relative",
-    minHeight: 360,
+    minHeight: 430,
     backgroundImage: "url(/hero-bike.jpeg)",
     backgroundSize: "cover",
-    backgroundPosition: "center",
+    backgroundPosition: "center 62%",
   };
 
   const heroOverlay: React.CSSProperties = {
     position: "absolute",
     inset: 0,
-    // similar to C6L: left-to-right gradient so text stays readable
     background:
-      "linear-gradient(90deg, rgba(11,31,59,.60), rgba(11,31,59,.30), rgba(11,31,59,.08))",
+      "linear-gradient(90deg, rgba(11,31,59,.72), rgba(11,31,59,.42), rgba(11,31,59,.14))",
   };
 
   const heroInner: React.CSSProperties = {
     position: "relative",
     padding: 18,
-    maxWidth: 760,
+    maxWidth: 780,
   };
 
   const heroKicker: React.CSSProperties = {
-    fontWeight: 1000,
+    fontWeight: 700,
     color: "rgba(255,255,255,.88)",
     fontSize: 14,
+    letterSpacing: ".01em",
   };
 
   const h1: React.CSSProperties = {
-    margin: "8px 0 0",
+    margin: "10px 0 0",
     fontSize: 36,
     lineHeight: 1.08,
     letterSpacing: "-0.02em",
-    fontWeight: 1100 as any,
+    fontWeight: 800,
     color: "white",
   };
 
   const lead: React.CSSProperties = {
-    marginTop: 10,
-    color: "rgba(255,255,255,.92)",
-    lineHeight: 1.65,
-    fontWeight: 600,
-    maxWidth: 80 * 12,
+    marginTop: 12,
+    color: "rgba(255,255,255,.94)",
+    lineHeight: 1.7,
+    fontWeight: 500,
+    maxWidth: 820,
   };
 
   const ctaRow: React.CSSProperties = {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 14,
-  };
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+  marginTop: 16,
+  alignItems: "flex-start",
+};
 
   const primaryBtn: React.CSSProperties = {
     display: "inline-flex",
@@ -122,9 +129,9 @@ export default function Home() {
     padding: "10px 14px",
     borderRadius: 999,
     border: "1px solid rgba(255,255,255,.25)",
-    background: "rgba(255,255,255,.12)",
+    background: "rgba(255,255,255,.16)",
     color: "white",
-    fontWeight: 1000,
+    fontWeight: 700,
     textDecoration: "none",
     whiteSpace: "nowrap",
   };
@@ -132,8 +139,8 @@ export default function Home() {
   const secondaryBtn: React.CSSProperties = {
     ...primaryBtn,
     background: "rgba(255,255,255,.08)",
-    border: "1px solid rgba(255,255,255,.22)",
-    fontWeight: 950,
+    border: "1px solid rgba(255,255,255,.18)",
+    fontWeight: 600,
   };
 
   const heroLinksWrap: React.CSSProperties = {
@@ -147,7 +154,7 @@ export default function Home() {
 
   const heroLink: React.CSSProperties = {
     color: "#0b1f3b",
-    fontWeight: 950,
+    fontWeight: 600,
     textDecoration: "none",
   };
 
@@ -163,8 +170,8 @@ export default function Home() {
   };
 
   const trustLeft: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
-  const trustTitle: React.CSSProperties = { fontWeight: 1100 as any, color: "#0f172a" };
-  const trustSub: React.CSSProperties = { ...muted, fontWeight: 650 };
+  const trustTitle: React.CSSProperties = { fontWeight: 700, color: "#0f172a" };
+  const trustSub: React.CSSProperties = { ...muted, fontWeight: 400 };
 
   const chipRow: React.CSSProperties = {
     display: "flex",
@@ -183,13 +190,13 @@ export default function Home() {
     background: "rgba(248,250,252,.85)",
     color: "#334155",
     fontSize: 13,
-    fontWeight: 900,
+    fontWeight: 600,
   };
 
   const sectionTitle: React.CSSProperties = {
     margin: 0,
     fontSize: 18,
-    fontWeight: 1100 as any,
+    fontWeight: 700,
     color: "#0f172a",
   };
 
@@ -205,8 +212,8 @@ export default function Home() {
     marginTop: 14,
   };
 
-  const smallCardTitle: React.CSSProperties = { fontWeight: 1100 as any, color: "#0f172a" };
-  const smallCardText: React.CSSProperties = { ...muted, marginTop: 6, lineHeight: 1.65, fontWeight: 600 };
+  const smallCardTitle: React.CSSProperties = { fontWeight: 700, color: "#0f172a" };
+  const smallCardText: React.CSSProperties = { ...muted, marginTop: 6, lineHeight: 1.7, fontWeight: 400 };
 
   const selectWrap: React.CSSProperties = {
     display: "flex",
@@ -219,7 +226,7 @@ export default function Home() {
     display: "flex",
     flexDirection: "column",
     gap: 6,
-    fontWeight: 950,
+    fontWeight: 600,
     minWidth: 240,
   };
 
@@ -228,7 +235,7 @@ export default function Home() {
     borderRadius: 12,
     border: "1px solid #e2e8f0",
     background: "white",
-    fontWeight: 800,
+    fontWeight: 600,
     color: "#0f172a",
   };
 
@@ -241,35 +248,39 @@ export default function Home() {
     border: "1px solid #e2e8f0",
     background: "#0b1f3b",
     color: "white",
-    fontWeight: 1000,
+    fontWeight: 700,
     textDecoration: "none",
     whiteSpace: "nowrap",
+  };
+
+  const railCard: React.CSSProperties = {
+    ...card,
+    background: "linear-gradient(180deg, #ffffff, #f8fafc)",
   };
 
   const faqWrap: React.CSSProperties = { marginTop: 14 };
 
   return (
     <div style={page}>
-      {/* HERO (C6L-style: image + gradient overlay, text on image) */}
       <section style={heroWrap}>
         <div style={heroBg}>
           <div style={heroOverlay} />
           <div style={heroInner}>
-            <div style={heroKicker}>Canada-wide vision • Safety-first • Structured process</div>
+            <div style={heroKicker}>Registry road tests only • Safety-first • Structured process</div>
 
-            <h1 style={h1}>Pass your road test - even if you don't own a motorcycle.</h1>
+            <h1 style={h1}>Pass your road test even if you do not own a motorcycle.</h1>
 
             <div style={lead}>
-              BorrowMyBike connects test-takers with independent mentors who can meet at a registry with a road-test-ready
-              motorcycle. Short, controlled use for registry road tests only — built around accountability and clear rules.
+              BorrowMyBike helps connect test-takers with independent mentors who can meet at a registry with a road-test-ready
+              motorcycle. This is for short, controlled registry road tests only.
             </div>
 
             <div style={ctaRow}>
-              <Link to="/mentors/start" style={primaryBtn}>
-                I'm taking my road test →
+              <Link to="/test-takers" style={primaryBtn}>
+                I&apos;m taking my road test →
               </Link>
-              <Link to="/test-takers" style={secondaryBtn}>
-                Earn $100 (list your bike) →
+              <Link to="/mentors/start" style={secondaryBtn}>
+                List your bike • Earn $100 per road-test →
               </Link>
               <Link to="/browse" style={secondaryBtn}>
                 Browse bikes →
@@ -278,12 +289,29 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Links moved UNDER the image for legibility */}
+        <div style={{
+  marginTop: 0,
+  display: "flex",
+  justifyContent: "center",   // centers horizontally
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 14,
+  fontSize: 12,
+  color: "#ffffff",
+  opacity: 0.85,
+  letterSpacing: 0.2,
+  textAlign: "center"
+}}>
+             <span>Registry road tests only</span>
+             <span>-  Secure payments via Stripe  -</span>
+             <span>Mentors control bookings</span>
+         </div>
+
         <div style={heroLinksWrap}>
           <Link to="/legal#damage" style={heroLink}>
             Damage &amp; responsibility →
           </Link>
-          <Link to="/legal" style={heroLink}>
+          <Link to="/rules" style={heroLink}>
             Rules &amp; process →
           </Link>
           <Link to="/browse" style={heroLink}>
@@ -292,12 +320,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Stripe trust block (right after solution) */}
       <section style={trustStrip}>
         <div style={trustLeft}>
           <div style={trustTitle}>Secure payments, payouts, and refunds — powered by Stripe.</div>
           <div style={trustSub}>
-            Booking payments and deposits are processed securely. The platform enforces the written rules and records outcomes.
+            Booking payments and deposits are processed securely, and the platform applies the written rules consistently.
           </div>
         </div>
 
@@ -308,11 +335,10 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Location selector (province + city only; registry happens at checkout) */}
       <section style={{ ...card, marginTop: 14 }}>
-        <div style={sectionTitle}>Find a bike in your area - choose your province and city</div>
-        <div style={{ ...muted, marginTop: 6, fontWeight: 650, lineHeight: 1.65 }}>
-          We’re launching city-by-city. Alberta is live first — more provinces and cities are opening soon.
+        <div style={sectionTitle}>Find a bike in your area</div>
+        <div style={{ ...muted, marginTop: 6, lineHeight: 1.65 }}>
+          We&apos;re launching city by city. Alberta is live first, with more locations opening over time.
         </div>
 
         <div style={selectWrap}>
@@ -323,7 +349,6 @@ export default function Home() {
               onChange={(e) => {
                 const next = e.target.value as ProvinceCode | "";
                 setProv(next);
-                // reset city on province change
                 const nextCities = next ? CITY_OPTIONS[next as ProvinceCode] : [];
                 setCity(nextCities[0]?.slug ?? "");
               }}
@@ -332,7 +357,7 @@ export default function Home() {
               <option value="">Select a province…</option>
               {PROVINCES.map((p) => (
                 <option key={p.code} value={p.code} disabled={!isProvinceEnabled(p.code)}>
-                  {provinceLabel(p.code)} {!isProvinceEnabled(p.code) ? " (soon)" : ""}
+                  {provinceLabel(p.code)} {!isProvinceEnabled(p.code) ? "(soon)" : ""}
                 </option>
               ))}
             </select>
@@ -365,172 +390,175 @@ export default function Home() {
           </div>
         </div>
 
-        <div style={{ ...muted, marginTop: 10, fontSize: 13, fontWeight: 650 }}>
-          Note: registry selection happens at test taker booking - Registry quadrant shows on mentor dashboard, address visible after acceptance
+        <div style={{ ...muted, marginTop: 10, fontSize: 13 }}>
+          You&apos;ll choose the registry location during booking.
         </div>
       </section>
 
-      {/* How it works + mentor/test-taker value props */}
       <section style={grid2}>
         <div style={card}>
           <div style={sectionTitle}>How it works</div>
-          <ol style={{ margin: "10px 0 0", paddingLeft: 22, ...muted, lineHeight: 1.7, fontWeight: 650 }}>
+          <ol style={{ margin: "10px 0 0", paddingLeft: 22, ...muted, lineHeight: 1.7 }}>
             <li>
-              <b>Request a booking.</b> Choose a bike and select your registry at checkout.
+              <b>Request a booking.</b> Choose a bike and pick your registry during checkout.
             </li>
             <li>
-              <b>Mentor accepts or declines.</b> Mentors stay in control and can decline any request.
+              <b>The mentor reviews it.</b> Mentors can accept or decline any request.
             </li>
             <li>
-              <b>Meet at the registry.</b> Complete the road test and return the bike immediately afterward.
+              <b>Meet at the registry.</b> Complete the road test and return the bike right after.
             </li>
           </ol>
 
-          <div style={{ ...muted, marginTop: 10, fontWeight: 700 }}>
+          <div style={{ ...muted, marginTop: 10 }}>
             Payments, payouts, and refunds are handled securely through <b>Stripe</b>.
           </div>
         </div>
 
-        <div style={card}>
-          <div style={sectionTitle}>Mentor opportunity</div>
-          <div style={{ ...muted, marginTop: 8, lineHeight: 1.7, fontWeight: 650 }}>
-            Mentors earn <b>$100</b> for a completed booking. Bring your road-test-ready bike to the registry, wait nearby, and
-            confirm you have your bike back when the test is done.
-          </div>
+        <div style={railCard}>
+  <div style={sectionTitle}>Road test tips, guides, and checklists</div>
 
-          <div style={{ ...muted, marginTop: 10, lineHeight: 1.7, fontWeight: 650 }}>
-            Deposits are for accountability (not “damage coverage”), and the platform applies the written rules consistently.
-          </div>
+  <div style={{ ...muted, marginTop: 8, lineHeight: 1.7 }}>
+    Detailed road test guides live on{" "}
+    <a
+      href="https://class6loaner.com/road-test-guide/"
+      target="_blank"
+      rel="noreferrer"
+      style={{ fontWeight: 700, color: "#0f172a", textDecoration: "underline" }}
+    >
+      Class6Loaner.com
+    </a>.
+  </div>
 
-          <div style={{ marginTop: 12 }}>
-            <Link to="/mentors/start" style={browseBtn}>
-              Start mentor onboarding →
-            </Link>
-          </div>
-        </div>
+  <div style={{ ...muted, marginTop: 10, fontSize: 14, lineHeight: 1.7 }}>
+    Use Class6Loaner for road test prep, checklists, and test-day tips.
+  </div>
+
+  <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 12 }}>
+    <a
+      href="https://class6loaner.com/road-test-guide/"
+      target="_blank"
+      rel="noreferrer"
+      style={browseBtn}
+    >
+      View road test guide →
+    </a>
+
+    <Link to="/browse" style={{ ...browseBtn, background: "white", color: "#0f172a" }}>
+      Browse bikes →
+    </Link>
+  </div>
+</div>
       </section>
 
       <section style={grid3}>
         <div style={card}>
           <div style={smallCardTitle}>For test-takers</div>
           <div style={smallCardText}>
-            Predictable steps, practical expectations, and less anxiety. Get matched with a road-test-ready bike and a mentor who
-            can coordinate calmly before test day.
+            Clear steps, practical expectations, and less last-minute stress. Find a road-test-ready bike and coordinate with a
+            mentor before test day.
           </div>
         </div>
 
         <div style={card}>
           <div style={smallCardTitle}>For mentors</div>
           <div style={smallCardText}>
-            Controlled scenario: registry road test only (short, monitored, and goal-oriented). Accept/decline any request. Earn
-            $100 when complete.
+            Controlled use at the registry, no recreational riding, and full control over whether to accept a request. Earn <strong>$100</strong>
+            for a completed booking.
           </div>
         </div>
 
         <div style={card}>
-          <div style={smallCardTitle}>Trust &amp; enforcement</div>
+          <div style={smallCardTitle}>Built around accountability</div>
           <div style={smallCardText}>
-            Clear policies and documented outcomes. Secure payments, payouts, and refunds through Stripe.
+            Written rules, secure payments, documented outcomes, and a process designed for short registry road test bookings.
           </div>
         </div>
       </section>
 
-      {/* FAQ (accordion) */}
       <section style={{ ...card, ...faqWrap }}>
-        <h2 style={{ margin: 0, fontWeight: 1100 as any, color: "#0f172a" }}>Common Questions</h2>
-        <p style={{ ...muted, margin: "10px 0 0", maxWidth: 90 * 12, fontWeight: 650 }}>
-          Expand only what you care about.
+        <h2 style={{ margin: 0, fontWeight: 700, color: "#0f172a" }}>Common questions</h2>
+        <p style={{ ...muted, margin: "10px 0 0", maxWidth: 900 }}>
+          Open the questions you want answered.
         </p>
 
         <div style={{ marginTop: 12 }}>
           <details className="bmb-acc">
             <summary>
               <span>Is this a rental business?</span>
-              <span className="bmb-accHint"> no rentals</span>
             </summary>
             <div className="bmb-accBody">
-              This is for <b>registry road tests only</b>. No recreational rentals and no joyrides. The purpose is a structured,
-              safety-first process for completing a scheduled road test.
+              No. BorrowMyBike is for <b>registry road tests only</b>. No recreational rentals and no joyrides.
             </div>
           </details>
 
           <details className="bmb-acc">
             <summary>
               <span>How do payments work?</span>
-              <span className="bmb-accHint"> Stripe</span>
             </summary>
             <div className="bmb-accBody">
-              Payments, refunds, and payouts are processed securely through <b>Stripe</b>. The platform enforces the written
-              rules and records outcomes to keep the process consistent.
+              Payments, refunds, and payouts are processed securely through <b>Stripe</b>, and the platform applies the written
+              rules consistently.
             </div>
           </details>
 
           <details className="bmb-acc">
             <summary>
-               <span>What do mentors earn?</span>
-               <span className="bmb-accHint"> $100</span>
+              <span>What do mentors earn?</span>
             </summary>
             <div className="bmb-accBody">
-               Mentors earn <strong>$100</strong> for a completed booking after confirming the bike is returned.
+              Mentors earn <strong>$100</strong> for a completed booking after confirming the bike is returned.
             </div>
           </details>
 
           <details className="bmb-acc">
             <summary>
               <span>What about damage?</span>
-              <span className="bmb-accHint"> responsibility</span>
             </summary>
             <div className="bmb-accBody">
-              Road tests are short and controlled, but if something happens, responsibility follows the rules you accept at
-              checkout and the standard insurance process. See{" "}
-              <Link to="/legal#damage" style={{ fontWeight: 950 }}>
-                Damage &amp; responsibility →
-              </Link>
+              If something goes wrong, responsibility follows the rules accepted during booking and the standard insurance process.
+              See <Link to="/legal#damage"> Damage &amp; responsibility →</Link>
             </div>
           </details>
 
           <details className="bmb-acc">
-           <summary>
-             <span>What about deposits and no-shows?</span>
-             <span className="bmb-accHint"> accountability</span>
-           </summary>
-           <div className="bmb-accBody">
-             Deposits discourage no-shows and last-minute issues. If a road test cannot proceed due to one party's fault,
-             the platform rules determine forfeiture and compensation.
-           </div>
+            <summary>
+              <span>What about deposits and no-shows?</span>
+            </summary>
+            <div className="bmb-accBody">
+              Deposits discourage no-shows and last-minute problems. If a road test cannot proceed because of one party&apos;s fault,
+              the platform rules decide forfeiture and compensation.
+            </div>
           </details>
 
           <details className="bmb-acc">
             <summary>
               <span>Can mentors decline requests?</span>
-              <span className="bmb-accHint"> yes</span>
             </summary>
             <div className="bmb-accBody">
-              Yes. Mentors stay in control and can decline any request (distance, schedule, comfort level, or any reason).
+              Yes. Mentors stay in control and can decline any request for scheduling, distance, comfort level, or any other
+              reason.
             </div>
           </details>
 
           <details className="bmb-acc">
             <summary>
               <span>Do mentors teach people how to ride?</span>
-              <span className="bmb-accHint"> no lessons</span>
             </summary>
             <div className="bmb-accBody">
-              No. This is not instruction. In-app messaging is for coordination and sharing experience-based safety tips — not
-              lessons or last-minute coaching.
+              No. This platform is for coordination and road test access, not rider training or lessons.
             </div>
           </details>
 
           <details className="bmb-acc">
-           <summary>
-             <span>How do cancellations work?</span>
-             <span className="bmb-accHint"> rules</span>
-           </summary>
-           <div className="bmb-accBody">
-             Once a booking is accepted it becomes confirmed. Cancellation outcomes depend on timing and fault scenarios
-             as defined in the platform policies.
-           </div>
-         </details>
+            <summary>
+              <span>How do cancellations work?</span>
+            </summary>
+            <div className="bmb-accBody">
+              Once a booking is accepted, cancellation outcomes depend on timing and fault scenarios as defined in the platform
+              policies.
+            </div>
+          </details>
         </div>
       </section>
     </div>

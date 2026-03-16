@@ -1,5 +1,5 @@
 // src/pages/BorrowerDashboard.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
 import { sb } from "../lib/supabase";
@@ -8,6 +8,8 @@ import ReviewModal from "../components/ReviewModal";
 import BookingMessages from "../components/BookingMessages";
 import { acceptanceDeadlineMs, acceptanceHoursFor } from "../lib/acceptance";
 import Countdown from "../components/Countdown";
+import { useNavigate } from "react-router-dom";
+import { trackEvent } from "../lib/analytics";
 
 type BookingRow = {
   id: string;
@@ -70,7 +72,10 @@ function shortId(id?: string | null) {
 }
 
 function bookingStateLabel(b: BookingRow): string {
-  if (b.cancelled) return "Cancelled";
+ if (b.cancelled) {
+  if (b.cancelled_by === "system_expired") return "Expired";
+  return "Cancelled";
+}
   if (b.needs_review) return "Needs review";
   if (b.settled) {
     const outcome = (b.settlement_outcome || "").toLowerCase();
@@ -153,7 +158,7 @@ function cancelTitleFor(b: BookingRow) {
 /**
  * Check-in window (MATCH MENTOR DASH):
  * - Opens 15 minutes before scheduled time
- * - Closes 2 hours after scheduled time
+ * - Closes 60 minutes after scheduled time
  */
 function checkInWindowFor(b: BookingRow) {
   const iso = scheduledIsoFor(b);
@@ -163,7 +168,7 @@ function checkInWindowFor(b: BookingRow) {
   if (Number.isNaN(t)) return null;
 
   const openMs = t - 15 * 60 * 1000;
-  const closeMs = t + 2 * 60 * 60 * 1000;
+  const closeMs = t + 60 * 60 * 1000;
   return { openMs, closeMs };
 }
 
@@ -172,7 +177,7 @@ function isWithin(now: number, openMs: number, closeMs: number) {
 }
 
 /**
- * Completion confirmation allowed (MATCH MENTOR DASH):
+ * Completion confirmation allowed (MATCH BACKEND):
  * - After scheduled time + 20 minutes
  */
 function completionAllowedAtFor(b: BookingRow) {
@@ -190,7 +195,14 @@ function completionAllowedAtFor(b: BookingRow) {
 
 export default function BorrowerDashboard() {
   const { user } = useAuth();
+  const nav = useNavigate();
   const me = user?.id;
+
+  useEffect(() => {
+  if (!user) {
+    nav("/auth", { replace: true });
+  }
+}, [user, nav]);
 
   const [rows, setRows] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -210,6 +222,10 @@ export default function BorrowerDashboard() {
   const [fmInFlight, setFmInFlight] = useState<Record<string, boolean>>({});
   const [noShowInFlight, setNoShowInFlight] = useState<Record<string, boolean>>({});
   const [examinerRefusalInFlight, setExaminerRefusalInFlight] = useState<Record<string, boolean>>({});
+
+  const trackedBorrowerCheckIns = useRef<Record<string, boolean>>({});
+  const trackedBorrowerCompletions = useRef<Record<string, boolean>>({});
+
 
   async function requestForceMajeureAsBorrower(b: BookingRow) {
     if (!me) return;
@@ -265,6 +281,7 @@ export default function BorrowerDashboard() {
         body: { booking_id: b.id, claimed_by: "borrower" },
       });
       if (error) throw error;
+      trackEvent("examiner_refusal_reported", { booking_id: b.id, bike_id: b.bike_id, reported_by: "borrower", scheduled_start_at: scheduledIsoFor(b) ?? "" });
       await load();
     } catch (e: any) {
       console.error(e);
@@ -308,6 +325,35 @@ export default function BorrowerDashboard() {
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
+  useEffect(() => {
+    if (!me) return;
+
+    for (const b of rows) {
+      const borrowerChecked = hasBorrowerCheckedIn(b);
+      if (borrowerChecked && !trackedBorrowerCheckIns.current[b.id]) {
+        trackedBorrowerCheckIns.current[b.id] = true;
+        trackEvent("borrower_checked_in", {
+          booking_id: b.id,
+          bike_id: b.bike_id,
+          status: b.status ?? "",
+          scheduled_start_at: scheduledIsoFor(b) ?? "",
+        });
+      }
+
+      const borrowerCompleted = !!b.borrower_confirmed_complete;
+      if (borrowerCompleted && !trackedBorrowerCompletions.current[b.id]) {
+        trackedBorrowerCompletions.current[b.id] = true;
+        trackEvent("booking_completed", {
+          booking_id: b.id,
+          bike_id: b.bike_id,
+          role: "borrower",
+          settlement_outcome: b.settlement_outcome ?? "",
+          scheduled_start_at: scheduledIsoFor(b) ?? "",
+        });
+      }
+    }
+  }, [me, rows]);
+
 
   // Auto-expire bookings that missed the mentor acceptance window.
   // Backend truth: cancel-booking with cancelled_by="system_expired" will issue borrower credit when applicable.
@@ -378,6 +424,7 @@ export default function BorrowerDashboard() {
     setErr(null);
     try {
       await callFn("check-in", { booking_id: b.id, role: "borrower" });
+      trackEvent("borrower_check_in_clicked", { booking_id: b.id, bike_id: b.bike_id, scheduled_start_at: scheduledIsoFor(b) ?? "" });
       await load();
     } catch (e: any) {
       setErr(e?.message || "Check-in failed");
@@ -391,6 +438,8 @@ export default function BorrowerDashboard() {
     setErr(null);
     try {
       await callFn("complete-booking", { booking_id: b.id, role: "borrower" });
+      trackEvent("booking_completed", { booking_id: b.id, bike_id: b.bike_id, role: "borrower", scheduled_start_at: scheduledIsoFor(b) ?? "" });
+      trackedBorrowerCompletions.current[b.id] = true;
       await load();
     } catch (e: any) {
       setErr(e?.message || "Confirm completion failed");
@@ -404,13 +453,14 @@ export default function BorrowerDashboard() {
     if (noShowInFlight[b.id]) return;
 
     const ok = window.confirm(
-      "Claim no-show?\n\nUse this only if you checked in and the mentor did not show up. This will trigger settlement."
+    "Confirm mentor no-show?\n\nOnly use this if you checked in on time and the mentor did not arrive for the booking. If you continue, this booking will be settled under the owner no-show rules."
     );
     if (!ok) return;
 
     setNoShowInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: true }));
     try {
       await callFn("settle-booking", { booking_id: b.id, claim_no_show: true, claimant_role: "borrower" });
+      trackEvent("no_show_claimed", { booking_id: b.id, bike_id: b.bike_id, claimant_role: "borrower", scheduled_start_at: scheduledIsoFor(b) ?? "" });
       await load();
     } catch (e: any) {
       alert(e?.message || "No-show claim failed");
@@ -463,48 +513,30 @@ export default function BorrowerDashboard() {
     gap: 8,
   };
 
-  // Always visible “How it works” card (keep this for onboarding)
+  // Lightweight onboarding card — push detailed education to Class6Loaner for SEO.
   const howItWorks = (
     <div style={{ ...cardShell, marginTop: 14 }}>
-      <div style={{ fontWeight: 600, fontSize: 18 }}>How it works (for Test-Takers)</div>
-      <div style={{ marginTop: 8, color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
-        This platform is built for <b>registry road tests</b> — not recreational rentals. Deposits + rules reduce no-shows
-        and last-minute surprises.
+      <div style={{ fontWeight: 600, fontSize: 18 }}>New here?</div>
+      <div style={{ marginTop: 8, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 920 }}>
+        BorrowMyBike is built for registry road tests, not recreational rentals.
       </div>
-
-      <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-        <div style={{ color: "#0f172a", fontWeight: 600 }}>1) Browse and choose a bike</div>
-        <div style={{ color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
-          Pick a bike near your registry appointment. Mentors can accept or decline requests.
-        </div>
-
-        <div style={{ color: "#0f172a", fontWeight: 600 }}>2) Confirm and prepare</div>
-        <div style={{ color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
-          Arrive ready: at minimum a <b>helmet</b> and a <b>hands-free device</b> for directions (AB for now; other
-          provinces may require a radio provided by the examiner).
-        </div>
-
-        <div style={{ color: "#0f172a", fontWeight: 600 }}>3) Meet at the registry</div>
-        <div style={{ color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
-          Your mentor meets you at the pre-arranged registry. We recommend they verify your ID before the ride begins.
-        </div>
-
-        <div style={{ color: "#0f172a", fontWeight: 600 }}>4) After the test</div>
-        <div style={{ color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
-          You confirm the test is completed. The mentor confirms they have their bike back (possession).
-        </div>
+      <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 920 }}>
+        For how it works, rules, and first-time test-taker guidance, see the Class6Loaner guide.
       </div>
 
       <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Link to="/browse" style={btnPrimary}>
-          Browse bikes →
-        </Link>
-        <Link to="/test-takers" style={btnSecondary}>
-          Test-Taker info →
-        </Link>
-        <Link to="/legal" style={btnSecondary}>
-          Rules &amp; policies →
-        </Link>
+
+       
+        <a
+          href="https://class6loaner.com/how-it-works"
+          target="_blank"
+          rel="noreferrer"
+          style={btnSecondary}
+        >
+          How it works →
+        </a>
+
+      
       </div>
     </div>
   );
@@ -521,9 +553,7 @@ export default function BorrowerDashboard() {
         <Link to="/browse" style={btnPrimary}>
           Browse bikes →
         </Link>
-        <Link to="/test-takers" style={btnSecondary}>
-          Learn how it works →
-        </Link>
+       
         <Link to="/legal" style={btnSecondary}>
           Policies →
         </Link>
@@ -535,6 +565,9 @@ export default function BorrowerDashboard() {
       </div>
     </div>
   );
+
+  // redirect guard — prevents dashboard render before redirect
+if (!user) return null;
 
   return (
     <div style={page}>
@@ -621,8 +654,8 @@ export default function BorrowerDashboard() {
                     const iso = scheduledIsoFor(b);
                     const startMs = typeof iso === "string" ? new Date(iso).getTime() : NaN;
                     const nowMs = Date.now();
-                    const within24h =
-                      Number.isFinite(startMs) && nowMs >= startMs - 24 * 60 * 60 * 1000 && nowMs <= startMs;
+                    const within2h =
+                      Number.isFinite(startMs) && nowMs >= startMs - 2 * 60 * 60 * 1000 && nowMs <= startMs;
                     const fmBorrower = (b as any).force_majeure_borrower_agreed_at as string | null | undefined;
                     const fmOwner = (b as any).force_majeure_owner_agreed_at as string | null | undefined;
 
@@ -638,7 +671,7 @@ export default function BorrowerDashboard() {
                       Number.isFinite(scheduledMs) && isWithin(Date.now(), scheduledMs, scheduledMs + 10 * 60 * 1000);
 
                     const showFm =
-                      bothPaidConfirmed && within24h && !borrowerChecked && !ownerChecked && !b.settled && !b.completed;
+                      bothPaidConfirmed && within2h && !borrowerChecked && !ownerChecked && !b.settled && !b.completed;
 
                     const showExaminerRefusal =
                       bothPaidConfirmed &&
@@ -676,7 +709,7 @@ export default function BorrowerDashboard() {
                           <button
                             onClick={() => requestExaminerRefusalAsBorrower(b)}
                             disabled={examinerRefusalInFlight[b.id]}
-                            title="Examiner refused the road test (e.g., weather/unsafe conditions/registry reschedule) before anyone checks in."
+                            title="Examiner refused the road test. Only use this when BOTH parties have checked in and the examiner/registry refuses the test at the scheduled start time."
                             style={{
                               padding: "10px 14px",
                               borderRadius: 14,
@@ -798,82 +831,97 @@ export default function BorrowerDashboard() {
 
                   {/* Force Majeure (discreet) — 24h before start, only before anyone checks in */}
                   {(() => {
-                    const iso = scheduledIsoFor(b);
-                    const startMs = typeof iso === "string" ? new Date(iso).getTime() : NaN;
-                    const nowMs = Date.now();
-                    const within24h =
-                      Number.isFinite(startMs) && nowMs >= startMs - 24 * 60 * 60 * 1000 && nowMs <= startMs;
-                    const fmBorrower = (b as any).force_majeure_borrower_agreed_at as string | null | undefined;
-                    const fmOwner = (b as any).force_majeure_owner_agreed_at as string | null | undefined;
+  const iso = scheduledIsoFor(b);
+  const startMs = typeof iso === "string" ? new Date(iso).getTime() : NaN;
+  const nowMs = Date.now();
 
-                    const bothPaidConfirmed =
-                      !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
+  const fmBorrower = (b as any).force_majeure_borrower_agreed_at as string | null | undefined;
+  const fmOwner = (b as any).force_majeure_owner_agreed_at as string | null | undefined;
 
-	                    const showFm = bothPaidConfirmed && within24h && !borrowerChecked && !ownerChecked && !b.settled && !b.completed;
+  const bothPaidConfirmed =
+    !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
 
-	                    // Examiner refusal: same visibility rules as FM (pre-check-in, within 24h)
-	                    const showExaminerRefusal =
-	                      bothPaidConfirmed &&
-	                      within24h &&
-	                      !borrowerChecked &&
-	                      !ownerChecked &&
-	                      !b.settled &&
-	                      !b.completed;
+  const withinFmWindow =
+    Number.isFinite(startMs) &&
+    nowMs >= startMs - 2 * 60 * 60 * 1000 &&
+    nowMs <= startMs;
 
-                    if (!showFm && !(fmBorrower || fmOwner) && !showExaminerRefusal) return null;
+  const withinExaminerRefusalWindow =
+    Number.isFinite(startMs) &&
+    nowMs >= startMs &&
+    nowMs <= startMs + 10 * 60 * 1000;
 
-                    return (
-                      <div style={{ marginTop: 10 }}>
-                        {showFm ? (
-                          <button
-                            onClick={() => requestForceMajeureAsBorrower(b)}
-                            disabled={isBusy || !!fmInFlight[b.id] || !!fmBorrower}
-                            style={{
-                              padding: "8px 12px",
-                              borderRadius: 12,
-                              border: "1px solid #cbd5e1",
-                              background: "white",
-                              fontWeight: 700,
-                              cursor: "pointer",
-                              opacity: isBusy || !!fmInFlight[b.id] || !!fmBorrower ? 0.6 : 1,
-                            }}
-                            title="Weather/registry reschedule (no penalties). Requires both parties to agree."
-                          >
-                            {fmBorrower ? "FM requested" : fmInFlight[b.id] ? "…" : "Weather / FM"}
-                          </button>
-                        ) : null}
+  const showFm =
+    bothPaidConfirmed &&
+    withinFmWindow &&
+    !borrowerChecked &&
+    !ownerChecked &&
+    !b.settled &&
+    !b.completed;
 
-                        {showExaminerRefusal ? (
-                          <button
-                            onClick={() => requestExaminerRefusalAsBorrower(b)}
-                            disabled={examinerRefusalInFlight[b.id]}
-                            title="Examiner refused the road test (e.g., weather/unsafe conditions/registry reschedule) before anyone checks in."
-                            style={{
-                              padding: "10px 14px",
-                              borderRadius: 14,
-                              border: "1px solid #cbd5e1",
-                              background: "white",
-                              fontWeight: 800,
-                              cursor: "pointer",
-                              opacity: examinerRefusalInFlight[b.id] ? 0.6 : 1,
-                            }}
-                          >
-                            {examinerRefusalInFlight[b.id] ? "Submitting…" : "Examiner refused"}
-                          </button>
-                        ) : null}
+  const showExaminerRefusal =
+    bothPaidConfirmed &&
+    borrowerChecked &&
+    ownerChecked &&
+    withinExaminerRefusalWindow &&
+    !b.settled &&
+    !b.completed &&
+    !b.cancelled;
 
-                        {(fmBorrower || fmOwner) ? (
-                          <div style={{ marginTop: 6, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
-                            {fmBorrower && fmOwner
-                              ? "Force majeure confirmed by both parties."
-                              : fmBorrower
-                              ? "FM requested — waiting for mentor to confirm."
-                              : "Mentor requested FM — you can confirm in this booking."}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })()}
+  if (!showFm && !(fmBorrower || fmOwner) && !showExaminerRefusal) return null;
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      {showFm ? (
+        <button
+          onClick={() => requestForceMajeureAsBorrower(b)}
+          disabled={isBusy || !!fmInFlight[b.id] || !!fmBorrower}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 12,
+            border: "1px solid #cbd5e1",
+            background: "white",
+            fontWeight: 700,
+            cursor: "pointer",
+            opacity: isBusy || !!fmInFlight[b.id] || !!fmBorrower ? 0.6 : 1,
+          }}
+          title="Weather/registry reschedule (no penalties). Requires both parties to agree."
+        >
+          {fmBorrower ? "FM requested" : fmInFlight[b.id] ? "…" : "Weather / FM"}
+        </button>
+      ) : null}
+
+      {showExaminerRefusal ? (
+        <button
+          onClick={() => requestExaminerRefusalAsBorrower(b)}
+          disabled={examinerRefusalInFlight[b.id]}
+          title="Examiner refused the road test. Only use this when BOTH parties have checked in and the examiner/registry refuses the test at the scheduled start time."
+          style={{
+            padding: "10px 14px",
+            borderRadius: 14,
+            border: "1px solid #cbd5e1",
+            background: "white",
+            fontWeight: 800,
+            cursor: "pointer",
+            opacity: examinerRefusalInFlight[b.id] ? 0.6 : 1,
+          }}
+        >
+          {examinerRefusalInFlight[b.id] ? "Submitting…" : "Examiner refused"}
+        </button>
+      ) : null}
+
+      {(fmBorrower || fmOwner) ? (
+        <div style={{ marginTop: 6, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
+          {fmBorrower && fmOwner
+            ? "Force majeure confirmed by both parties."
+            : fmBorrower
+            ? "FM requested — waiting for mentor to confirm."
+            : "Mentor requested FM — you can confirm in this booking."}
+        </div>
+      ) : null}
+    </div>
+  );
+})()}
 
                   <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {(borrowerChecked || checkInOpen) && (
@@ -884,7 +932,7 @@ export default function BorrowerDashboard() {
                         borrowerChecked
                           ? "You are checked in ✅"
                           : checkInOpen
-                          ? "Check in when you arrive at the registry (opens 15 min before start)."
+                          ? "Check in when you arrive at the registry."
                           : "Check-in opens 15 minutes before start."
                       }
                       style={{
@@ -961,9 +1009,9 @@ export default function BorrowerDashboard() {
                     const bothPaidConfirmed =
                       !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
 
-                    // Shows 5 min after start; becomes clickable at 30 min (backend truth).
-                    const showAtMs = Number.isFinite(startMs) ? startMs + 5 * 60 * 1000 : NaN;
-                    const enableAtMs = Number.isFinite(startMs) ? startMs + 30 * 60 * 1000 : NaN;
+                    // Shows 10 min after start; becomes clickable at 10 min (matches backend truth).
+                    const showAtMs = Number.isFinite(startMs) ? startMs + 10 * 60 * 1000 : NaN;
+                    const enableAtMs = Number.isFinite(startMs) ? startMs + 10 * 60 * 1000 : NaN;
 
                     const eligible =
                       bothPaidConfirmed &&
@@ -985,7 +1033,7 @@ export default function BorrowerDashboard() {
                         title={
                           enabled
                             ? "Claim no-show (mentor did not check in)."
-                            : "Available 30 minutes after the scheduled start time."
+                            : "Available 10 minutes after the scheduled start time."
                         }
                         style={{
                           padding: "10px 14px",

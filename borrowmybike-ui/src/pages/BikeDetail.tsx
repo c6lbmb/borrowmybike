@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { sb } from "../lib/supabase";
 import { isProvinceEnabled, provinceLabel, type ProvinceCode } from "../lib/provinces";
+import { trackEvent } from "../lib/analytics";
 
 type Bike = {
   id: string;
@@ -58,6 +59,7 @@ export default function BikeDetail() {
   const [owner, setOwner] = useState<OwnerSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [trackedBikeId, setTrackedBikeId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,6 +122,20 @@ export default function BikeDetail() {
     };
   }, [id]);
 
+  useEffect(() => {
+    if (loading || err || !bike) return;
+    if (trackedBikeId === bike.id) return;
+
+    trackEvent("bike_detail_viewed", {
+      bike_id: bike.id,
+      bike_title: titleOf(bike),
+      province: bike.province || "",
+      city: bike.city || "",
+      booking_enabled: bike.province ? isProvinceEnabled(bike.province) : false,
+    });
+    setTrackedBikeId(bike.id);
+  }, [loading, err, bike, trackedBikeId]);
+
   const avgBike = useMemo(() => {
     const vals = reviews.map((x) => x.bike_rating).filter((x): x is number => typeof x === "number");
     if (!vals.length) return null;
@@ -175,6 +191,15 @@ export default function BikeDetail() {
           {bookingEnabled ? (
             <Link
               to={`/bikes/${bike.id}/request`}
+              onClick={() => {
+                trackEvent("booking_request_started", {
+                  bike_id: bike.id,
+                  bike_title: titleOf(bike),
+                  province: bike.province || "",
+                  city: bike.city || "",
+                  source: "bike_detail_cta",
+                });
+              }}
               style={{
                 fontWeight: 900,
                 textDecoration: "none",

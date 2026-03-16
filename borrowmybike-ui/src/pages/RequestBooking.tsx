@@ -6,6 +6,8 @@ import { useAuth } from "../auth/useAuth";
 import ChecklistGateModal from "../components/ChecklistGateModal";
 import type { ChecklistItem } from "../components/ChecklistGateModal";
 import { isProvinceEnabled, provinceName } from "../lib/provinces";
+import { getMetroCities } from "../utils/metroAreas";
+import { trackEvent } from "../lib/analytics";
 
 type BikeRow = {
   id: string;
@@ -14,7 +16,7 @@ type BikeRow = {
   model?: string | null;
   year?: number | null;
   city?: string | null;
-  province?: string | null;
+  province?: string | null; 
 };
 
 type RegistryRow = {
@@ -151,6 +153,7 @@ export default function RequestBooking() {
 
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(false);
+  const [didTrackRequestStart, setDidTrackRequestStart] = useState(false);
 
   const title = useMemo(() => {
     if (!bike) return "Request booking";
@@ -193,7 +196,7 @@ export default function RequestBooking() {
     loadBike();
   }, [bikeId]);
 
-  useEffect(() => {
+   useEffect(() => {
     async function loadRegistries() {
       if (!bike) return;
 
@@ -204,144 +207,190 @@ export default function RequestBooking() {
       setRegistries([]);
       setRegistryId("");
 
-      // Prefer city-scoped registries to keep the dropdown short.
-      // If none exist for that city, fall back to province-wide.
-      let q = sb
+      const metroCities = city
+        ? getMetroCities(city).map((c) => c.trim().toLowerCase())
+        : [];
+
+      const { data, error } = await sb
         .from("registries")
         .select("id,name,city,address,province,is_active")
         .eq("is_active", true)
         .eq("province", prov)
+        .order("city", { ascending: true })
         .order("name", { ascending: true });
 
-      if (city) q = q.eq("city", city);
-
-      const first = await q;
-
-      if (!first.error && Array.isArray(first.data) && first.data.length > 0) {
-        setRegistries(first.data as any);
+      if (error) {
+        console.warn("Failed to load registries:", error);
+        setRegistries([]);
         setLoadingRegistries(false);
         return;
       }
 
-      const fallback = await sb
-        .from("registries")
-        .select("id,name,city,address,province,is_active")
-        .eq("is_active", true)
-        .eq("province", prov)
-        .order("name", { ascending: true });
+      const all = ((data as any) ?? []) as RegistryRow[];
 
-      if (fallback.error) {
-        console.warn("Failed to load registries:", fallback.error);
-        setRegistries([]);
-      } else {
-        setRegistries((fallback.data as any) ?? []);
+      const normalize = (value?: string | null) => String(value || "").trim().toLowerCase();
+
+      let next = all;
+
+      if (metroCities.length > 0) {
+        const metroSet = new Set(metroCities);
+
+        const clustered = all.filter((r) => metroSet.has(normalize(r.city)));
+
+        if (clustered.length > 0) {
+          next = clustered.sort((a, b) => {
+            const aExact = normalize(a.city) === normalize(city) ? 0 : 1;
+            const bExact = normalize(b.city) === normalize(city) ? 0 : 1;
+            if (aExact !== bExact) return aExact - bExact;
+
+            const byCity = normalize(a.city).localeCompare(normalize(b.city));
+            if (byCity !== 0) return byCity;
+
+            return (a.name || "").localeCompare(b.name || "");
+          });
+        }
       }
 
+      setRegistries(next);
       setLoadingRegistries(false);
     }
 
     loadRegistries();
-  }, [bike?.id]);
+  }, [bike?.id, bike?.city, bike?.province]);
+
+  useEffect(() => {
+    if (loadingBike || didTrackRequestStart || !bikeId || !bike) return;
+
+    trackEvent("booking_request_started", {
+      bike_id: bikeId,
+      bike_title: [bike.year, bike.make, bike.model].filter(Boolean).join(" ") || bikeId,
+      province: bike.province || "",
+      city: bike.city || "",
+      source: "request_page",
+    });
+    setDidTrackRequestStart(true);
+  }, [loadingBike, didTrackRequestStart, bikeId, bike]);
 
   const borrowerChecklist: ChecklistItem[] = useMemo(
-    () => [
-      {
-        id: "not_rental",
-        label: (
-          <>
-            I understand this is <strong>not a rental</strong>. This booking compensates a local mentor for time, fuel,
-            and admin — <strong>strictly for registry road tests</strong>.
-          </>
-        ),
-      },
-      {
-        id: "helmet",
-        label: (
-          <>
-            I will arrive with, at minimum, a <strong>proper motorcycle helmet</strong>.
-          </>
-        ),
-      },
-      {
-        id: "hands_free",
-        label: (
-          <>
-            I will bring a <strong>cell phone</strong> and <strong>hands-free audio</strong> (Bluetooth or wired earbuds) for directions
-            (AB rules for now).
-          </>
-        ),
-      },
-      { id: "arrive_early", label: <>I will arrive <strong>10–15 minutes early</strong> and be ready to start on time.</> },
-      {
-        id: "registry_docs",
-        label: (
-          <>
-            I will bring required <strong>ID / licence documents</strong> for my registry (requirements vary by province/registry).
-          </>
-        ),
-      },
-      {
-        id: "rules_ack",
-        label: (
-          <>
-            I have read and understand the <strong>Rules &amp; Process</strong> (cancellations, forfeitures, fault scenarios, and force-majeure).
-            I won’t say “I didn’t know.”{" "}
-            <Link to="/legal" style={{ fontWeight: 950 }}>View rules →</Link>
-          </>
-        ),
-      },
-      {
-        id: "damage_ack",
-        label: (
-          <>
-            I understand that if I cause <strong>loss or damage</strong> during the road test, I may be responsible according to the
-            terms I accepted at checkout.
-            {" "}
-            <Link to="/legal#damage" style={{ fontWeight: 950 }}>Damage &amp; responsibility →</Link>
-          </>
-        ),
-      },
-      {
-        id: "cancel_policy_ack",
-        label: (
-          <>
-            I understand cancellations after acceptance are strict:
-            {" "}
-            <strong>Early</strong> cancel is <strong>more than 5 days</strong> before the test (25% admin fee).
-            {" "}
-            <strong>Late</strong> cancel is <strong>5 days or less</strong> (including day 5) and can result in <strong>100% forfeiture</strong>.
-          </>
-        ),
-      },
-      {
-        id: "borrower_fault_forfeit",
-        label: (
-          <>
-            If the test cannot proceed due to <strong>test-taker fault</strong> (no helmet, no hands-free, late/no-show, unfit to ride),
-            I <strong>forfeit</strong> the booking fee.
-          </>
-        ),
-      },
-    ],
-    []
-  );
+  () => [
+    {
+      id: "gear",
+      label: (
+        <>
+          I will arrive at the selected registry with <strong>proper safety gear</strong>, including a helmet, long pants,
+          a long-sleeve jacket, and closed-toe shoes at minimum.
+        </>
+      ),
+    },
+    {
+      id: "docs_and_arrival",
+      label: (
+        <>
+          I will arrive <strong>at least 20 minutes before</strong> the scheduled road test with all required documentation,
+          including my valid driver’s or learner’s licence and any documents required by the registry.
+        </>
+      ),
+    },
+    {
+      id: "not_rental",
+      label: (
+        <>
+          I understand this booking is <strong>strictly for the registry road test</strong> and not for practice riding,
+          transportation, or recreational riding.
+        </>
+      ),
+    },
+    {
+      id: "rules_ack",
+      label: (
+        <>
+          I understand the platform’s <strong>cancellation, no-show, and fault rules</strong> apply once I submit this request.{" "}
+          <Link to="/rules" style={{ fontWeight: 950 }}>Rules &amp; Process →</Link>
+        </>
+      ),
+    },
+    {
+      id: "credit_ack",
+      label: (
+        <>
+          I understand that in certain scenarios, refunds may be issued as <strong>platform credit</strong> according to the
+          BorrowMyBike rules and policies.{" "}
+          <Link to="/legal" style={{ fontWeight: 950 }}>Legal &amp; Policies →</Link>
+        </>
+      ),
+    },
+    {
+      id: "damage_ack",
+      label: (
+        <>
+          I understand I am responsible for any damage that occurs due to my <strong>negligent use</strong> of the motorcycle.
+        </>
+      ),
+    },
+    {
+      id: "legal_permission",
+      label: (
+        <>
+          I confirm I am <strong>legally permitted to operate a motorcycle</strong> for the purpose of the road test.
+        </>
+      ),
+    },
+  ],
+  []
+);
+
+  function trackRequestFailed(reason: string, message: string) {
+    trackEvent("booking_request_failed", {
+      bike_id: bikeId,
+      owner_id: bike?.owner_id || "",
+      province: bike?.province || "",
+      city: bike?.city || "",
+      reason,
+      message,
+    });
+  }
 
   async function submitRequest() {
     setErr(null);
     setOkMsg(null);
 
-    if (!me) return setErr("Please sign in first.");
-    if (!bikeId) return setErr("Missing bike id in URL.");
-    if (!bike?.owner_id) return setErr("This bike is missing an owner_id in the database.");
-    if (provinceBlocked) return setErr(`Bookings are not available in ${blockedProvinceName} yet.`);
+    if (!me) {
+      trackRequestFailed("missing_auth", "Please sign in first.");
+      return setErr("Please sign in first.");
+    }
+    if (!bikeId) {
+      trackRequestFailed("missing_bike_id", "Missing bike id in URL.");
+      return setErr("Missing bike id in URL.");
+    }
+    if (!bike?.owner_id) {
+      trackRequestFailed("missing_owner_id", "This bike is missing an owner_id in the database.");
+      return setErr("This bike is missing an owner_id in the database.");
+    }
+    if (provinceBlocked) {
+      const message = `Bookings are not available in ${blockedProvinceName} yet.`;
+      trackRequestFailed("province_blocked", message);
+      return setErr(message);
+    }
 
 
-    if (!registryQuadrant) return setErr("Please select the registry area (NE / NW / SE / SW).");
-    if (registries.length > 0 && !registryId) return setErr("Please select your registry location from the list.");
-    if (!testTakerIntro.trim()) return setErr("Please write a short intro (shown to the mentor).");
+    if (!registryQuadrant) {
+      trackRequestFailed("missing_registry_quadrant", "Please select the registry area (NE / NW / SE / SW).");
+      return setErr("Please select the registry area (NE / NW / SE / SW).");
+    }
+    if (registries.length > 0 && !registryId) {
+      trackRequestFailed("missing_registry_id", "Please select your registry location from the list.");
+      return setErr("Please select your registry location from the list.");
+    }
+    if (!testTakerIntro.trim()) {
+      trackRequestFailed("missing_intro", "Please write a short intro (shown to the mentor).");
+      return setErr("Please write a short intro (shown to the mentor).");
+    }
 
     const whenIso = isoWithTzFromLocalDatetime(whenLocal);
-    if (!whenIso) return setErr("Invalid date/time.");
+    if (!whenIso) {
+      trackRequestFailed("invalid_datetime", "Invalid date/time.");
+      return setErr("Invalid date/time.");
+    }
 
     const payload = {
       borrower_id: me,
@@ -355,6 +404,17 @@ export default function RequestBooking() {
       registry_quadrant: registryQuadrant || null,
       test_taker_intro: (testTakerIntro || "").trim() || null,
     };
+
+    trackEvent("booking_request_submitted", {
+      bike_id: bikeId,
+      owner_id: bike.owner_id,
+      province: bike?.province || "",
+      city: bike?.city || "",
+      registry_id: registryId || "",
+      registry_quadrant: registryQuadrant || "",
+      time_window: timeWindow || "",
+      used_intro: !!testTakerIntro.trim(),
+    });
 
     setSubmitting(true);
 
@@ -373,8 +433,18 @@ export default function RequestBooking() {
 
     if (error) {
       const msg = error.message || "Failed to create booking.";
-      if (msg.toLowerCase().includes("slot not available") || msg.includes("409")) {
-        setErr("That time slot is no longer available. Pick another time.");
+      const lower = msg.toLowerCase();
+      const dataError = String(data?.error || "").toLowerCase();
+      const dataDetails = String(data?.details || "").toLowerCase();
+
+      if (
+        lower.includes("slot not available") ||
+        lower.includes("non-2xx") ||
+        lower.includes("409") ||
+        dataError.includes("slot not available") ||
+        dataDetails.includes("slot not available")
+      ) {
+        setErr("This bike is already booked for that time or too close to another booking. Please choose a different time.");
       } else {
         setErr(msg);
       }
@@ -387,10 +457,27 @@ export default function RequestBooking() {
     const usedCredit = data?.used_credit ?? false;
 
     if (checkoutUrl) {
+      trackEvent("booking_request_succeeded", {
+        bike_id: bikeId,
+        booking_id: bookingId || "",
+        province: bike?.province || "",
+        city: bike?.city || "",
+        checkout_flow: true,
+        used_credit: usedCredit,
+      });
       setOkMsg("Redirecting to Stripe checkout…");
       window.location.assign(checkoutUrl);
       return;
     }
+
+    trackEvent("booking_request_succeeded", {
+      bike_id: bikeId,
+      booking_id: bookingId || "",
+      province: bike?.province || "",
+      city: bike?.city || "",
+      checkout_flow: false,
+      used_credit: usedCredit,
+    });
 
     setOkMsg(usedCredit ? "Booked using credit. Redirecting…" : "Booking created. Redirecting…");
     nav("/dashboard", { replace: true, state: { bookingId } });
@@ -401,8 +488,15 @@ export default function RequestBooking() {
     setErr(null);
     setOkMsg(null);
 
-    if (!me) return setErr("Please sign in first.");
-    if (provinceBlocked) return setErr(`Bookings are not available in ${blockedProvinceName} yet.`);
+    if (!me) {
+      trackRequestFailed("missing_auth", "Please sign in first.");
+      return setErr("Please sign in first.");
+    }
+    if (provinceBlocked) {
+      const message = `Bookings are not available in ${blockedProvinceName} yet.`;
+      trackRequestFailed("province_blocked", message);
+      return setErr(message);
+    }
     setChecklistOpen(true);
   }
 
