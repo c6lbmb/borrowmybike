@@ -1,9 +1,9 @@
 // src/pages/RequestBooking.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { sb } from "../lib/supabase";
 import { useAuth } from "../auth/useAuth";
-import ChecklistGateModal from "../components/ChecklistGateModal";
+
 import type { ChecklistItem } from "../components/ChecklistGateModal";
 import { isProvinceEnabled, provinceName } from "../lib/provinces";
 import { getMetroCities } from "../utils/metroAreas";
@@ -152,6 +152,8 @@ export default function RequestBooking() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
   const [checklistOpen, setChecklistOpen] = useState(false);
+  const [checklistChecks, setChecklistChecks] = useState<Record<string, boolean>>({});
+  const checklistRef = useRef<HTMLDivElement | null>(null);
   const [policyOpen, setPolicyOpen] = useState(false);
   const [didTrackRequestStart, setDidTrackRequestStart] = useState(false);
 
@@ -339,6 +341,29 @@ export default function RequestBooking() {
   []
 );
 
+  useEffect(() => {
+    if (!checklistOpen) return;
+
+    const init: Record<string, boolean> = {};
+    for (const item of borrowerChecklist) init[item.id] = false;
+    setChecklistChecks(init);
+
+    const timer = window.setTimeout(() => {
+      checklistRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+
+    return () => window.clearTimeout(timer);
+  }, [checklistOpen, borrowerChecklist]);
+
+  const allChecklistChecked = useMemo(() => {
+    if (!borrowerChecklist.length) return true;
+    return borrowerChecklist.every((item) => checklistChecks[item.id]);
+  }, [borrowerChecklist, checklistChecks]);
+
+  const checklistCheckedCount = useMemo(() => {
+    return borrowerChecklist.filter((item) => checklistChecks[item.id]).length;
+  }, [borrowerChecklist, checklistChecks]);
+
   function trackRequestFailed(reason: string, message: string) {
     trackEvent("booking_request_failed", {
       bike_id: bikeId,
@@ -484,7 +509,7 @@ export default function RequestBooking() {
     setSubmitting(false);
   }
 
-  function onClickRequest() {
+    function onClickRequest() {
     setErr(null);
     setOkMsg(null);
 
@@ -497,6 +522,16 @@ export default function RequestBooking() {
       trackRequestFailed("province_blocked", message);
       return setErr(message);
     }
+
+    if (checklistOpen) {
+      if (!allChecklistChecked) {
+        trackRequestFailed("borrower_checklist_incomplete", "Please complete the checklist below before continuing.");
+        return setErr("Please complete the checklist below before continuing.");
+      }
+      submitRequest();
+      return;
+    }
+
     setChecklistOpen(true);
   }
 
@@ -755,7 +790,7 @@ export default function RequestBooking() {
               </div>
             </label>
 
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <button
                 onClick={onClickRequest}
                 disabled={submitting || loadingBike || !me}
@@ -769,7 +804,7 @@ export default function RequestBooking() {
                   color: "white",
                 }}
               >
-                {submitting ? "Submitting…" : "Request booking"}
+                {submitting ? "Submitting…" : checklistOpen ? "Complete checklist below to continue ↓" : "Request booking"}
               </button>
 
               <button
@@ -791,6 +826,149 @@ export default function RequestBooking() {
                 Back to Dashboard
               </Link>
             </div>
+
+            {checklistOpen ? (
+              <div
+                ref={checklistRef}
+                style={{
+                  marginTop: 14,
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 16,
+                  background: "#f8fafc",
+                  padding: 14,
+                  scrollMarginTop: 96,
+                }}
+              >
+                <div style={{ fontWeight: 900, fontSize: 18, color: "#0f172a" }}>
+                  Complete this checklist before continuing
+                </div>
+
+                <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
+                  We want zero surprises. Please confirm you’re prepared and you understand the rules.
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: "1px solid #e2e8f0",
+                    background: "white",
+                  }}
+                >
+                  <div style={{ fontWeight: 900, color: "#334155" }}>Checklist progress</div>
+                  <div style={{ fontWeight: 1000, color: "#0f172a" }}>
+                    {checklistCheckedCount}/{borrowerChecklist.length}
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  {borrowerChecklist.map((item) => (
+                    <label
+                      key={item.id}
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "flex-start",
+                        padding: 12,
+                        borderRadius: 14,
+                        border: "1px solid #e2e8f0",
+                        background: "white",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!checklistChecks[item.id]}
+                        onChange={(e) =>
+                          setChecklistChecks((prev) => ({
+                            ...prev,
+                            [item.id]: e.target.checked,
+                          }))
+                        }
+                        style={{ marginTop: 3 }}
+                      />
+                      <div style={{ color: "#0f172a", fontWeight: 600, lineHeight: 1.6 }}>
+                        {item.label ?? item.text ?? ""}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    border: "1px solid #fde68a",
+                    background: "#fffbeb",
+                    borderRadius: 14,
+                    padding: 12,
+                    color: "#713f12",
+                    fontWeight: 600,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  Early cancel: <strong>more than 5 days</strong> (25% admin fee). Late cancel: <strong>5 days or less</strong> (incl. day 5) may be forfeiture.
+                </div>
+
+                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    onClick={onClickRequest}
+                    disabled={submitting || !allChecklistChecked}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 14,
+                      border: "1px solid #0f172a",
+                      fontWeight: 900,
+                      cursor: submitting || !allChecklistChecked ? "not-allowed" : "pointer",
+                      background: "#0f172a",
+                      color: "white",
+                      opacity: submitting || !allChecklistChecked ? 0.6 : 1,
+                    }}
+                  >
+                    {submitting ? "Submitting…" : "I understand — continue"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChecklistOpen(false);
+                      setChecklistChecks({});
+                    }}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 14,
+                      border: "1px solid #cbd5e1",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      background: "white",
+                    }}
+                  >
+                    Not ready
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPolicyOpen(true)}
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 14,
+                      border: "1px solid #cbd5e1",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      background: "white",
+                    }}
+                  >
+                    View rules
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -837,41 +1015,6 @@ export default function RequestBooking() {
           </div>
         ) : null}
       </div>
-
-      <ChecklistGateModal
-        open={checklistOpen}
-        title="Before you continue"
-        intro={<>We want zero surprises. Please confirm you’re prepared and you understand the rules.</>}
-        requiredItems={borrowerChecklist}
-        footerNote={
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <span>
-              Early cancel: <strong>more than 5 days</strong> (25% admin fee). Late cancel: <strong>5 days or less</strong> (incl. day 5) may be forfeiture.
-            </span>
-            <button
-              type="button"
-              onClick={() => setPolicyOpen(true)}
-              style={{
-                border: "1px solid #cbd5e1",
-                background: "white",
-                borderRadius: 12,
-                padding: "6px 10px",
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              View rules
-            </button>
-          </div>
-        }
-        confirmText="I understand — continue"
-        cancelText="Not ready"
-        onCancel={() => setChecklistOpen(false)}
-        onConfirm={() => {
-          setChecklistOpen(false);
-          submitRequest();
-        }}
-      />
 
       <Modal open={policyOpen} title="Rules & Process (clear + enforceable)" onClose={() => setPolicyOpen(false)}>
         <div style={{ fontWeight: 900, marginBottom: 8 }}>

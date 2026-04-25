@@ -61,65 +61,67 @@ export default function ChecklistGateModal(props: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 bg-black/60 p-3 sm:p-4"
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl">
-        <div className="mb-3">
+      <div className="mx-auto flex max-h-[calc(100dvh-24px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl sm:max-h-[calc(100dvh-32px)]">
+        <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
           <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
           <div className="mt-1 text-sm font-medium text-slate-500">
-            Check each item before continuing.
+            Complete the checklist below before continuing.
           </div>
         </div>
 
-        {intro ? (
-          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700">
-            {intro}
-          </div>
-        ) : null}
-
-        {!!requiredItems.length ? (
-          <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-            <div className="font-semibold text-slate-700">Checklist progress</div>
-            <div className="font-extrabold text-slate-900">
-              {checkedCount}/{requiredItems.length}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          {intro ? (
+            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+              {intro}
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        <div className="space-y-3">
-          {requiredItems.map((item) => {
-            const labelNode = item.label ?? item.text ?? "";
-            return (
-              <label
-                key={item.id}
-                className="flex cursor-pointer gap-3 rounded-xl border border-slate-200 bg-white p-3 transition hover:border-slate-300 hover:bg-slate-50"
-              >
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4"
-                  checked={!!checked[item.id]}
-                  onChange={(e) =>
-                    setChecked((prev) => ({
-                      ...prev,
-                      [item.id]: e.target.checked,
-                    }))
-                  }
-                />
-                <div className="text-sm leading-6 text-slate-800">{labelNode}</div>
-              </label>
-            );
-          })}
+          {!!requiredItems.length ? (
+            <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+              <div className="font-semibold text-slate-700">Checklist progress</div>
+              <div className="font-extrabold text-slate-900">
+                {checkedCount}/{requiredItems.length}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            {requiredItems.map((item) => {
+              const labelNode = item.label ?? item.text ?? "";
+              return (
+                <label
+                  key={item.id}
+                  className="flex cursor-pointer gap-3 rounded-xl border border-slate-200 bg-white p-3 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0"
+                    checked={!!checked[item.id]}
+                    onChange={(e) =>
+                      setChecked((prev) => ({
+                        ...prev,
+                        [item.id]: e.target.checked,
+                      }))
+                    }
+                  />
+                  <div className="text-sm leading-6 text-slate-800">{labelNode}</div>
+                </label>
+              );
+            })}
+          </div>
+
+          {footerNote ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-slate-700">
+              {footerNote}
+            </div>
+          ) : null}
         </div>
 
-        {footerNote ? (
-          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-slate-700">
-            {footerNote}
-          </div>
-        ) : null}
-
-        <div className="mt-5 flex items-center justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-5">
           <button
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
             onClick={onCancel}

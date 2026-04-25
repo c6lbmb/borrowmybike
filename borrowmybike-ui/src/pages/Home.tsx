@@ -2,32 +2,20 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PROVINCES, isProvinceEnabled, provinceLabel, type ProvinceCode } from "../lib/provinces";
+import { getLaunchCityOptions } from "../utils/metroAreas";
 
 type CityDef = { slug: string; name: string };
 
-const CITY_OPTIONS: Record<ProvinceCode, CityDef[]> = {
-  AB: [
-    { slug: "calgary", name: "Calgary" },
-    { slug: "edmonton", name: "Edmonton" },
-    { slug: "red-deer", name: "Red Deer" },
-    { slug: "lethbridge", name: "Lethbridge" },
-    { slug: "medicine-hat", name: "Medicine Hat" },
-    { slug: "grande-prairie", name: "Grande Prairie" },
-    { slug: "fort-mcmurray", name: "Fort McMurray" },
-  ],
-  BC: [],
-  SK: [],
-  MB: [],
-  ON: [],
-  QC: [],
-  NB: [],
-  NS: [],
-  PE: [],
-  NL: [],
-  YT: [],
-  NT: [],
-  NU: [],
-};
+function cityNameToSlug(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function getCityOptions(province: ProvinceCode): CityDef[] {
+  return getLaunchCityOptions(province).map((name: string) => ({
+    slug: cityNameToSlug(name),
+    name,
+  }));
+}
 
 export default function Home() {
   const [prov, setProv] = useState<ProvinceCode | "">("AB");
@@ -35,9 +23,9 @@ export default function Home() {
 
   const provinceEnabled = prov ? isProvinceEnabled(prov as ProvinceCode) : false;
 
-  const cityOptions = useMemo(() => {
+   const cityOptions = useMemo(() => {
     if (!prov) return [];
-    return CITY_OPTIONS[prov as ProvinceCode] ?? [];
+    return getCityOptions(prov as ProvinceCode);
   }, [prov]);
 
   const selectedCityName = useMemo(() => {
@@ -349,7 +337,7 @@ export default function Home() {
               onChange={(e) => {
                 const next = e.target.value as ProvinceCode | "";
                 setProv(next);
-                const nextCities = next ? CITY_OPTIONS[next as ProvinceCode] : [];
+                const nextCities = next ? getCityOptions(next as ProvinceCode) : [];
                 setCity(nextCities[0]?.slug ?? "");
               }}
               style={select}
@@ -362,6 +350,7 @@ export default function Home() {
               ))}
             </select>
           </label>
+          
 
           <label style={selectLabel}>
             <span style={{ ...muted, fontSize: 13 }}>City</span>

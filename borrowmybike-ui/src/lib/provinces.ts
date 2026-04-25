@@ -27,7 +27,7 @@ export type ProvinceDef = {
 };
 
 export const PROVINCES: ProvinceDef[] = [
-  { code: "BC", name: "British Columbia", enabled: false, launchEnabled: false },
+  { code: "BC", name: "British Columbia", enabled: true, launchEnabled: true },
   { code: "AB", name: "Alberta", enabled: true, launchEnabled: true },
   { code: "SK", name: "Saskatchewan", enabled: false, launchEnabled: false },
   { code: "MB", name: "Manitoba", enabled: false, launchEnabled: false },

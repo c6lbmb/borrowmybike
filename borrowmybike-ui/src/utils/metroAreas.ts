@@ -73,6 +73,15 @@ export const METRO_GROUPS: MetroGroup[] = [
       "Redcliff",
     ],
   },
+    {
+    key: "drumheller",
+    province: "AB",
+    label: "Drumheller",
+    launchCity: "Drumheller",
+    cities: [
+      "Drumheller",
+    ],
+  },
   {
     key: "grande_prairie",
     province: "AB",
@@ -96,24 +105,28 @@ export const METRO_GROUPS: MetroGroup[] = [
 
   // Keep BC helpers here for later expansion, but Alberta remains the launch priority.
   {
-    key: "vancouver",
-    province: "BC",
-    label: "Vancouver",
-    launchCity: "Vancouver",
-    cities: [
-      "Vancouver",
-      "Burnaby",
-      "New Westminster",
-      "Surrey",
-      "Coquitlam",
-      "Port Coquitlam",
-      "Port Moody",
-      "Richmond",
-      "Delta",
-      "Langley",
-      "Abbotsford",
-    ],
-  },
+  key: "vancouver",
+  province: "BC",
+  label: "Vancouver",
+  launchCity: "Vancouver",
+  cities: [
+    "Vancouver",
+    "North Vancouver",
+    "West Vancouver",
+    "Burnaby",
+    "New Westminster",
+    "Surrey",
+    "Coquitlam",
+    "Port Coquitlam",
+    "Port Moody",
+    "Richmond",
+    "Delta",
+    "White Rock",
+    "Maple Ridge",
+    "Langley",
+    "Abbotsford",
+  ],
+},
 ];
 
 function normalize(value: string | null | undefined) {

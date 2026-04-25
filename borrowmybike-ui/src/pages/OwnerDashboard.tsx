@@ -8,6 +8,12 @@ import Countdown from "../components/Countdown";
 import BookingMessages from "../components/BookingMessages";
 import { trackEvent } from "../lib/analytics";
 
+type LatestMessageMeta = {
+  bookingId: string;
+  senderUserId: string;
+  createdAt: string;
+};
+
 type BookingRow = {
   id: string;
   bike_id: string;
@@ -96,7 +102,7 @@ function bookingStateLabel(b: BookingRow): string {
   if (b.cancelled_by === "system_expired") return "Expired";
   return "Cancelled";
 }
-  if (b.needs_review) return "Needs review";
+  if (b.needs_review) return b.review_reason === "examiner_refusal" ? "Examiner refusal under review" : "Needs review";
   if (b.settled) {
     const outcome = (b.settlement_outcome || "").toLowerCase();
     if (outcome === "force_majeure") return "Force majeure";
@@ -292,12 +298,14 @@ export default function OwnerDashboard() {
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openMsgId, setOpenMsgId] = useState<string | null>(null);
+  const [latestMessageByBooking, setLatestMessageByBooking] = useState<Record<string, LatestMessageMeta>>({});
+  const [seenMessageByBooking, setSeenMessageByBooking] = useState<Record<string, string>>({});
 
   const [fmBusyId, setFmBusyId] = useState<string | null>(null);
   const [fmPendingId, setFmPendingId] = useState<string | null>(null);
 
   const [refusalOpenId, setRefusalOpenId] = useState<string | null>(null);
-  const [refusalReason, setRefusalReason] = useState<"motorcycle" | "test_taker" | "unavoidable" | "other" | "">("");
+  const [refusalReason, setRefusalReason] = useState<"motorcycle_issue" | "not_ready" | "registry_reschedule" | "weather_conditions" | "other" | "">("");
   const [refusalNote, setRefusalNote] = useState<string>("");
   const [refusalBusyId, setRefusalBusyId] = useState<string | null>(null);
 
@@ -307,6 +315,7 @@ export default function OwnerDashboard() {
 
   // Mentor accept checklist gate
   const [gateBooking, setGateBooking] = useState<BookingRow | null>(null);
+  const gateChecklistRef = useRef<HTMLDivElement | null>(null);
   // Deposit preference is captured right before settlement (after the bike is returned), not at accept.
   const [gateChecks, setGateChecks] = useState<Record<string, boolean>>({});
 
@@ -393,6 +402,93 @@ function closeAcceptChecklist() {
   setGateChecks({});
 }
 
+  useEffect(() => {
+    if (!gateBooking) return;
+
+    const t = window.setTimeout(() => {
+      gateChecklistRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+
+    return () => window.clearTimeout(t);
+  }, [gateBooking]);
+
+    function seenStorageKey(bookingId: string) {
+    return `bmb:messages:lastSeen:${me}:${bookingId}`;
+  }
+
+  function readSeenIso(bookingId: string) {
+    if (!me) return null;
+    try {
+      return window.localStorage.getItem(seenStorageKey(bookingId));
+    } catch {
+      return null;
+    }
+  }
+
+  function markMessagesSeen(bookingId: string, latestIso: string | null) {
+    if (!me || !latestIso) return;
+    try {
+      window.localStorage.setItem(seenStorageKey(bookingId), latestIso);
+    } catch {}
+    setSeenMessageByBooking((prev) => ({ ...prev, [bookingId]: latestIso }));
+  }
+
+  function hasUnreadMessages(bookingId: string) {
+    const latest = latestMessageByBooking[bookingId];
+    if (!latest) return false;
+    if (latest.senderUserId === me) return false;
+
+    const seenIso = seenMessageByBooking[bookingId] ?? readSeenIso(bookingId);
+    if (!seenIso) return true;
+
+    const latestMs = new Date(latest.createdAt).getTime();
+    const seenMs = new Date(seenIso).getTime();
+    if (Number.isNaN(latestMs) || Number.isNaN(seenMs)) return latest.createdAt !== seenIso;
+    return latestMs > seenMs;
+  }
+
+  async function loadLatestMessageMeta(bookingIds: string[]) {
+    if (!bookingIds.length) {
+      setLatestMessageByBooking({});
+      setSeenMessageByBooking({});
+      return;
+    }
+
+    try {
+      const res = await sb
+        .from("booking_messages")
+        .select("booking_id,sender_user_id,created_at")
+        .in("booking_id", bookingIds)
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+      if (res.error) throw res.error;
+
+      const latestMap: Record<string, LatestMessageMeta> = {};
+      for (const row of ((res.data as any[]) || [])) {
+        const bookingId = row.booking_id as string | undefined;
+        if (!bookingId || latestMap[bookingId]) continue;
+        latestMap[bookingId] = {
+          bookingId,
+          senderUserId: String(row.sender_user_id || ""),
+          createdAt: String(row.created_at || ""),
+        };
+      }
+      setLatestMessageByBooking(latestMap);
+
+      if (me) {
+        const seenMap: Record<string, string> = {};
+        for (const bookingId of bookingIds) {
+          const seenIso = readSeenIso(bookingId);
+          if (seenIso) seenMap[bookingId] = seenIso;
+        }
+        setSeenMessageByBooking(seenMap);
+      }
+    } catch {
+      setLatestMessageByBooking({});
+    }
+  }
+
   async function load() {
     if (!me) return;
     setLoading(true);
@@ -402,13 +498,15 @@ function closeAcceptChecklist() {
       const res = await sb
         .from("bookings")
         .select(
-          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,test_taker_intro,time_window,registry_quadrant",
+          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,tag_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,test_taker_intro,time_window,registry_quadrant",
         )
         .eq("owner_id", me)
         .order("created_at", { ascending: false });
 
       if (res.error) throw res.error;
-      setRows(((res.data as any) || []) as BookingRow[]);
+      const nextRows = (((res.data as any) || []) as BookingRow[]);
+      setRows(nextRows);
+      await loadLatestMessageMeta(nextRows.map((row) => row.id));
     } catch (e: any) {
       setErr(e?.message || "Failed to load bookings");
       setRows([]);
@@ -449,6 +547,47 @@ function closeAcceptChecklist() {
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
+
+    useEffect(() => {
+    if (!me) return;
+    if (!rows.length) return;
+
+    const bookingIds = new Set(rows.map((row) => row.id));
+
+    const channel = sb
+      .channel(`owner-dashboard-messages:${me}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "booking_messages" },
+        (payload: any) => {
+          const row = payload?.new as { booking_id?: string; sender_user_id?: string; created_at?: string } | undefined;
+          const bookingId = row?.booking_id;
+          if (!bookingId || !bookingIds.has(bookingId)) return;
+
+          const nextCreatedAt = String(row?.created_at || "");
+          const nextSenderUserId = String(row?.sender_user_id || "");
+
+          setLatestMessageByBooking((prev) => {
+            const current = prev[bookingId];
+            if (current && new Date(current.createdAt).getTime() >= new Date(nextCreatedAt).getTime()) return prev;
+            return {
+              ...prev,
+              [bookingId]: { bookingId, senderUserId: nextSenderUserId, createdAt: nextCreatedAt },
+            };
+          });
+
+          if (openMsgId === bookingId && nextCreatedAt) {
+            markMessagesSeen(bookingId, nextCreatedAt);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
+  }, [me, rows, openMsgId]);
+
   useEffect(() => {
     if (!me) return;
 
@@ -684,9 +823,18 @@ async function confirmBikeReturnedAsOwner(b: BookingRow) {
 
   const sorted = useMemo(() => rows, [rows]);
 
-  const upcoming = sorted.filter((b) => isConfirmedPaid(b));
   const pending = sorted.filter((b) => isPendingAcceptance(b));
-  const history = sorted.filter((b) => b.cancelled || b.settled || b.completed || isPastScheduled(b));
+  const underReview = sorted.filter(
+    (b) => b.needs_review && b.review_reason === "examiner_refusal" && !b.cancelled && !b.settled && !b.completed
+  );
+  const upcoming = sorted.filter(
+    (b) => isConfirmedPaid(b) && !(b.needs_review && b.review_reason === "examiner_refusal")
+  );
+  const history = sorted.filter(
+    (b) =>
+      (b.cancelled || b.settled || b.completed || isPastScheduled(b)) &&
+      !(b.needs_review && b.review_reason === "examiner_refusal")
+  );
 
   const cardShell: React.CSSProperties = {
     border: "1px solid #e2e8f0",
@@ -721,6 +869,20 @@ async function confirmBikeReturnedAsOwner(b: BookingRow) {
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
+  };
+
+    const newBadge: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    marginLeft: 6,
+    padding: "2px 8px",
+    borderRadius: 999,
+    border: "1px solid #fecaca",
+    background: "#fff1f2",
+    color: "#b00020",
+    fontWeight: 800,
+    fontSize: 12,
+    lineHeight: 1.2,
   };
 
   const bikeTitle = bike ? `${bike.year || ""} ${bike.make || ""} ${bike.model || ""}`.trim() || "Your bike" : "My Bike";
@@ -786,12 +948,14 @@ This will record your agreement and wait for the test-taker to agree.`
     }
 
     const label =
-      refusalReason === "motorcycle"
-        ? "Issue with motorcycle"
-        : refusalReason === "test_taker"
+      refusalReason === "motorcycle_issue"
+        ? "Issue with the motorcycle"
+        : refusalReason === "not_ready"
         ? "Test-taker not ready today"
-        : refusalReason === "unavoidable"
-        ? "Unavoidable conditions (weather / closure / emergency)"
+        : refusalReason === "registry_reschedule"
+        ? "Registry rescheduled / examiner unavailable"
+        : refusalReason === "weather_conditions"
+        ? "Weather / road conditions"
         : "Other";
 
     const note = (refusalNote || "").trim();
@@ -801,7 +965,7 @@ This will record your agreement and wait for the test-taker to agree.`
 
 Reason: ${label}${note ? `\nNote: ${note}` : ""}
 
-This will flag the booking for review and rebooking. Continue?`,
+This will flag the booking for review. It will not auto-settle the booking. Continue?`,
     );
     if (!ok) return;
 
@@ -811,8 +975,7 @@ This will flag the booking for review and rebooking. Continue?`,
       const { error } = await sb.functions.invoke("examiner-refusal", {
         body: {
           booking_id: b.id,
-          reason_code:
-            refusalReason === "unavoidable" ? "unavoidable" : (refusalReason as any),
+          reason_code: refusalReason,
           note: note || null,
         },
       });
@@ -829,7 +992,7 @@ This will flag the booking for review and rebooking. Continue?`,
                 ...r,
                 needs_review: true,
                 review_reason: "examiner_refusal",
-                tag_reason: `Examiner refused: ${label}${note ? ` — ${note}` : ""}`,
+                tag_reason: `${r.tag_reason ? `${r.tag_reason}\n` : ""}Examiner refused: ${label}${note ? ` — ${note}` : ""} (submitted by owner)`,
                 needs_rebooking: true,
               } as any)
             : r,
@@ -839,6 +1002,7 @@ This will flag the booking for review and rebooking. Continue?`,
       setRefusalOpenId(null);
       setRefusalReason("");
       setRefusalNote("");
+      alert("This booking has been flagged for review. We’ll review the information provided by both parties. If needed, email support with any extra details.");
     } catch (e: any) {
       alert(e?.message || "Failed to submit examiner refusal");
     } finally {
@@ -1076,7 +1240,7 @@ return (
                       opacity: busyId === b.id ? 0.7 : 1,
                     }}
                   >
-                    {busyId === b.id ? "…" : "Accept (pay deposit)"}
+                  {busyId === b.id ? "…" : gateBooking?.id === b.id ? "Complete checklist below to continue ↓" : "Accept (pay deposit)"}
                   </button>
 
                   <button
@@ -1097,9 +1261,11 @@ return (
                 </div>
 
                 {gateBooking?.id === b.id && (
-  <div
+    <div
+    ref={gateChecklistRef}
     style={{
       marginTop: 12,
+      scrollMarginTop: 96,
       border: "1px solid #dbeafe",
       background: "#f8fbff",
       borderRadius: 14,
@@ -1201,6 +1367,94 @@ return (
 )}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+
+      {/* Under Review */}
+      <div style={{ marginTop: 16, ...cardShell }}>
+        <div style={{ fontWeight: 600, fontSize: 18 }}>Under Review</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, lineHeight: 1.55, maxWidth: 820 }}>
+          Examiner-refusal bookings live here while support reviews the information provided by both parties.
+        </div>
+
+        {underReview.length === 0 ? (
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No bookings under review.</div>
+        ) : (
+          <div style={{ marginTop: 12 }}>
+            {underReview.map((b) => {
+              const borrowerChecked = !!b.borrower_checked_in;
+              const ownerChecked = !!b.owner_checked_in;
+              const ownerPossession = !!b.owner_confirmed_complete;
+              const borrowerComplete = !!b.borrower_confirmed_complete;
+
+              return (
+                <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
+                  <div style={{ fontWeight: 600 }}>Booking {shortId(b.id)}</div>
+                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>
+                    scheduled: {fmtDateTime(scheduledIsoFor(b))} • bike: {shortId(b.bike_id)}
+                  </div>
+
+                  <div style={{ marginTop: 10, fontWeight: 600, color: "#0f172a", lineHeight: 1.55 }}>
+                    Mentor check-in: {ownerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Test-taker check-in: {borrowerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Mentor possession: {ownerPossession ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Test-taker complete: {borrowerComplete ? "✅" : "—"}
+                  </div>
+
+                  <div style={{ marginTop: 10, color: "#7c2d12", fontWeight: 700, fontSize: 13, lineHeight: 1.55, maxWidth: 760 }}>
+                    This booking is under review after an examiner refusal. No further in-app actions are required while support reviews the information from both parties. If needed, email support with any extra details.
+                  </div>
+
+                  <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {isConfirmedBothPaid(b) ? (
+                      <button
+                        onClick={() => setOpenMsgId((cur) => (cur === b.id ? null : b.id))}
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: 14,
+                          border: "1px solid #cbd5e1",
+                          background: "white",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                       {openMsgId === b.id ? (
+                         "Hide messages"
+                       ) : hasUnreadMessages(b.id) ? (
+                      <>
+                           Messages <span style={newBadge}>New</span>
+                      </>
+                       ) : (
+                           "Messages"
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {openMsgId === b.id && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 14,
+                        padding: 12,
+                        background: "#f8fafc",
+                      }}
+                    >
+                      <BookingMessages
+                        bookingId={b.id}
+                        meId={b.owner_id}
+                        otherUserId={b.borrower_id}
+                        otherLabel="Test-taker"
+                        onMarkSeen={(latestIso) => markMessagesSeen(b.id, latestIso)}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1452,7 +1706,15 @@ return (
                         opacity: isBusy ? 0.6 : 1,
                       }}
                     >
-                       {openMsgId === b.id ? "Hide messages" : "Messages"}
+                       {openMsgId === b.id ? (
+                         "Hide messages"
+                      ) : hasUnreadMessages(b.id) ? (
+                      <>
+                         Messages <span style={newBadge}>New</span>
+                      </>
+                      ) : (
+                          "Messages"
+                       )}
                      </button>
                     )}
 
@@ -1493,7 +1755,8 @@ return (
                         meId={b.owner_id}
                         otherUserId={b.borrower_id}
                         otherLabel="Test-taker"
-/>
+                        onMarkSeen={(latestIso) => markMessagesSeen(b.id, latestIso)}
+                      />
                     </div>
                   )}
 
@@ -1517,8 +1780,8 @@ return (
                           <input
                             type="radio"
                             name={`refusal-${b.id}`}
-                            checked={refusalReason === "motorcycle"}
-                            onChange={() => setRefusalReason("motorcycle")}
+                            checked={refusalReason === "motorcycle_issue"}
+                            onChange={() => setRefusalReason("motorcycle_issue")}
                           />
                           Issue with motorcycle
                         </label>
@@ -1526,8 +1789,8 @@ return (
                           <input
                             type="radio"
                             name={`refusal-${b.id}`}
-                            checked={refusalReason === "test_taker"}
-                            onChange={() => setRefusalReason("test_taker")}
+                            checked={refusalReason === "not_ready"}
+                            onChange={() => setRefusalReason("not_ready")}
                           />
                           Test-taker not ready today
                         </label>
@@ -1535,8 +1798,8 @@ return (
                           <input
                             type="radio"
                             name={`refusal-${b.id}`}
-                            checked={refusalReason === "unavoidable"}
-                            onChange={() => setRefusalReason("unavoidable")}
+                            checked={refusalReason === "registry_reschedule"}
+                            onChange={() => setRefusalReason("registry_reschedule")}
                           />
                           Unavoidable conditions (weather / closure / emergency)
                         </label>

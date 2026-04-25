@@ -11,6 +11,12 @@ import Countdown from "../components/Countdown";
 import { useNavigate } from "react-router-dom";
 import { trackEvent } from "../lib/analytics";
 
+type LatestMessageMeta = {
+  bookingId: string;
+  senderUserId: string;
+  createdAt: string;
+};
+
 type BookingRow = {
   id: string;
   bike_id: string;
@@ -32,6 +38,7 @@ type BookingRow = {
 
   needs_review: boolean;
   review_reason: string | null;
+  tag_reason?: string | null;
 
   created_at: string | null;
 
@@ -76,7 +83,7 @@ function bookingStateLabel(b: BookingRow): string {
   if (b.cancelled_by === "system_expired") return "Expired";
   return "Cancelled";
 }
-  if (b.needs_review) return "Needs review";
+  if (b.needs_review) return b.review_reason === "examiner_refusal" ? "Examiner refusal under review" : "Needs review";
   if (b.settled) {
     const outcome = (b.settlement_outcome || "").toLowerCase();
     if (outcome === "force_majeure") return "Force majeure";
@@ -214,14 +221,19 @@ export default function BorrowerDashboard() {
 
   const canShowReview = !!(reviewCtx && reviewCtx.bookingId && reviewCtx.bikeId && reviewCtx.ownerId);
 
-  // Messages (only for confirmed bookings)
+    // Messages (only for confirmed bookings)
   const [openMsgId, setOpenMsgId] = useState<string | null>(null);
+  const [latestMessageByBooking, setLatestMessageByBooking] = useState<Record<string, LatestMessageMeta>>({});
+  const [seenMessageByBooking, setSeenMessageByBooking] = useState<Record<string, string>>({});
 
   // Prevent repeated system-expire attempts per booking (acceptance window timeout)
   const [systemExpireInFlight, setSystemExpireInFlight] = useState<Record<string, boolean>>({});
   const [fmInFlight, setFmInFlight] = useState<Record<string, boolean>>({});
   const [noShowInFlight, setNoShowInFlight] = useState<Record<string, boolean>>({});
   const [examinerRefusalInFlight, setExaminerRefusalInFlight] = useState<Record<string, boolean>>({});
+  const [refusalOpenId, setRefusalOpenId] = useState<string | null>(null);
+  const [refusalReason, setRefusalReason] = useState<"motorcycle_issue" | "not_ready" | "registry_reschedule" | "weather_conditions" | "other" | "">("");
+  const [refusalNote, setRefusalNote] = useState<string>("");
 
   const trackedBorrowerCheckIns = useRef<Record<string, boolean>>({});
   const trackedBorrowerCompletions = useRef<Record<string, boolean>>({});
@@ -270,27 +282,150 @@ export default function BorrowerDashboard() {
     if (!me) return;
     if (examinerRefusalInFlight[b.id]) return;
 
+    if (!refusalReason) {
+      alert("Please select a reason.");
+      return;
+    }
+
+    const label =
+      refusalReason === "motorcycle_issue"
+        ? "Issue with the motorcycle"
+        : refusalReason === "not_ready"
+        ? "Test-taker not ready today"
+        : refusalReason === "registry_reschedule"
+        ? "Registry rescheduled / examiner unavailable"
+        : refusalReason === "weather_conditions"
+        ? "Weather / road conditions"
+        : "Other";
+
+    const note = (refusalNote || "").trim();
+
     const ok = window.confirm(
-      "Examiner refused the road test?\n\nOnly use this if BOTH parties have checked in and the registry/examiner refuses the test at the start (e.g., safety/technical issue). This will settle the booking and issue rebook credits."
+      `Examiner refused the test.
+
+Reason: ${label}${note ? `
+Note: ${note}` : ""}
+
+This will flag the booking for review. It will not auto-settle the booking. Continue?`,
     );
     if (!ok) return;
 
     setExaminerRefusalInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: true }));
     try {
       const { error } = await sb.functions.invoke("examiner-refusal", {
-        body: { booking_id: b.id, claimed_by: "borrower" },
+        body: { booking_id: b.id, reason_code: refusalReason, note: note || null },
       });
       if (error) throw error;
-      trackEvent("examiner_refusal_reported", { booking_id: b.id, bike_id: b.bike_id, reported_by: "borrower", scheduled_start_at: scheduledIsoFor(b) ?? "" });
+      trackEvent("examiner_refusal_reported", {
+        booking_id: b.id,
+        bike_id: b.bike_id,
+        reported_by: "borrower",
+        reason_code: refusalReason || "",
+        scheduled_start_at: scheduledIsoFor(b) ?? "",
+      });
+      setRows((cur) =>
+        cur.map((r) =>
+          r.id === b.id
+            ? ({
+                ...r,
+                needs_review: true,
+                review_reason: "examiner_refusal",
+                tag_reason: `${r.tag_reason ? `${r.tag_reason}
+` : ""}Examiner refused: ${label}${note ? ` — ${note}` : ""} (submitted by borrower)`,
+              } as any)
+            : r,
+        ),
+      );
+      setRefusalOpenId(null);
+      setRefusalReason("");
+      setRefusalNote("");
+      alert("This booking has been flagged for review. We’ll review the information provided by both parties. If needed, email support with any extra details.");
       await load();
     } catch (e: any) {
       console.error(e);
-      alert(e?.message || "Examiner refusal failed");
+      alert(e?.message || "Failed to submit examiner refusal");
     } finally {
       setExaminerRefusalInFlight((p: Record<string, boolean>) => ({ ...p, [b.id]: false }));
     }
   }
 
+
+    function seenStorageKey(bookingId: string) {
+    return `bmb:messages:lastSeen:${me}:${bookingId}`;
+  }
+
+  function readSeenIso(bookingId: string) {
+    if (!me) return null;
+    try {
+      return window.localStorage.getItem(seenStorageKey(bookingId));
+    } catch {
+      return null;
+    }
+  }
+
+  function markMessagesSeen(bookingId: string, latestIso: string | null) {
+    if (!me || !latestIso) return;
+    try {
+      window.localStorage.setItem(seenStorageKey(bookingId), latestIso);
+    } catch {}
+    setSeenMessageByBooking((prev) => ({ ...prev, [bookingId]: latestIso }));
+  }
+
+  function hasUnreadMessages(bookingId: string) {
+    const latest = latestMessageByBooking[bookingId];
+    if (!latest) return false;
+    if (latest.senderUserId === me) return false;
+
+    const seenIso = seenMessageByBooking[bookingId] ?? readSeenIso(bookingId);
+    if (!seenIso) return true;
+
+    const latestMs = new Date(latest.createdAt).getTime();
+    const seenMs = new Date(seenIso).getTime();
+    if (Number.isNaN(latestMs) || Number.isNaN(seenMs)) return latest.createdAt !== seenIso;
+    return latestMs > seenMs;
+  }
+
+  async function loadLatestMessageMeta(bookingIds: string[]) {
+    if (!bookingIds.length) {
+      setLatestMessageByBooking({});
+      setSeenMessageByBooking({});
+      return;
+    }
+
+    try {
+      const res = await sb
+        .from("booking_messages")
+        .select("booking_id,sender_user_id,created_at")
+        .in("booking_id", bookingIds)
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+      if (res.error) throw res.error;
+
+      const latestMap: Record<string, LatestMessageMeta> = {};
+      for (const row of ((res.data as any[]) || [])) {
+        const bookingId = row.booking_id as string | undefined;
+        if (!bookingId || latestMap[bookingId]) continue;
+        latestMap[bookingId] = {
+          bookingId,
+          senderUserId: String(row.sender_user_id || ""),
+          createdAt: String(row.created_at || ""),
+        };
+      }
+      setLatestMessageByBooking(latestMap);
+
+      if (me) {
+        const seenMap: Record<string, string> = {};
+        for (const bookingId of bookingIds) {
+          const seenIso = readSeenIso(bookingId);
+          if (seenIso) seenMap[bookingId] = seenIso;
+        }
+        setSeenMessageByBooking(seenMap);
+      }
+    } catch {
+      setLatestMessageByBooking({});
+    }
+  }
 
   async function load() {
     if (!me) return;
@@ -301,13 +436,15 @@ export default function BorrowerDashboard() {
       const res = await sb
         .from("bookings")
         .select(
-          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,test_taker_intro,time_window,registry_quadrant"
+          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,tag_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,test_taker_intro,time_window,registry_quadrant"
         )
         .eq("borrower_id", me)
         .order("created_at", { ascending: false });
 
       if (res.error) throw res.error;
-      setRows(((res.data as any) || []) as BookingRow[]);
+      const nextRows = (((res.data as any) || []) as BookingRow[]);
+      setRows(nextRows);
+      await loadLatestMessageMeta(nextRows.map((row) => row.id));
     } catch (e: any) {
       setErr(e?.message || "Failed to load bookings");
       setRows([]);
@@ -316,15 +453,58 @@ export default function BorrowerDashboard() {
     }
   }
 
-  useEffect(() => {
+    useEffect(() => {
     if (!me) return;
-    load();
+    void load();
+
     const t = window.setInterval(() => {
-      load();
+      void load();
     }, 15000);
+
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
+
+    useEffect(() => {
+    if (!me) return;
+    if (!rows.length) return;
+
+    const bookingIds = new Set(rows.map((row) => row.id));
+
+    const channel = sb
+      .channel(`borrower-dashboard-messages:${me}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "booking_messages" },
+        (payload: any) => {
+          const row = payload?.new as { booking_id?: string; sender_user_id?: string; created_at?: string } | undefined;
+          const bookingId = row?.booking_id;
+          if (!bookingId || !bookingIds.has(bookingId)) return;
+
+          const nextCreatedAt = String(row?.created_at || "");
+          const nextSenderUserId = String(row?.sender_user_id || "");
+
+          setLatestMessageByBooking((prev) => {
+            const current = prev[bookingId];
+            if (current && new Date(current.createdAt).getTime() >= new Date(nextCreatedAt).getTime()) return prev;
+            return {
+              ...prev,
+              [bookingId]: { bookingId, senderUserId: nextSenderUserId, createdAt: nextCreatedAt },
+            };
+          });
+
+          if (openMsgId === bookingId && nextCreatedAt) {
+            markMessagesSeen(bookingId, nextCreatedAt);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      sb.removeChannel(channel);
+    };
+  }, [me, rows, openMsgId]);
+
   useEffect(() => {
     if (!me) return;
 
@@ -445,7 +625,7 @@ export default function BorrowerDashboard() {
       setErr(e?.message || "Confirm completion failed");
     } finally {
       setBusyId(null);
-    }
+    } 
   }
 
   async function claimNoShowAsTestTaker(b: BookingRow) {
@@ -472,8 +652,17 @@ export default function BorrowerDashboard() {
 
   const sorted = useMemo(() => rows, [rows]);
   const pending = sorted.filter((b) => isPendingAcceptance(b));
-  const upcoming = sorted.filter((b) => isConfirmedPaid(b));
-  const history = sorted.filter((b) => b.cancelled || b.settled || b.completed || isPastScheduled(b));
+  const underReview = sorted.filter(
+    (b) => b.needs_review && b.review_reason === "examiner_refusal" && !b.cancelled && !b.settled && !b.completed
+  );
+  const upcoming = sorted.filter(
+    (b) => isConfirmedPaid(b) && !(b.needs_review && b.review_reason === "examiner_refusal")
+  );
+  const history = sorted.filter(
+    (b) =>
+      (b.cancelled || b.settled || b.completed || isPastScheduled(b)) &&
+      !(b.needs_review && b.review_reason === "examiner_refusal")
+  );
 
   const page: React.CSSProperties = { padding: "2rem" };
 
@@ -511,6 +700,20 @@ export default function BorrowerDashboard() {
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
+  };
+
+    const newBadge: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    marginLeft: 6,
+    padding: "2px 8px",
+    borderRadius: 999,
+    border: "1px solid #fecaca",
+    background: "#fff1f2",
+    color: "#b00020",
+    fontWeight: 800,
+    fontSize: 12,
+    lineHeight: 1.2,
   };
 
   // Lightweight onboarding card — push detailed education to Class6Loaner for SEO.
@@ -707,7 +910,7 @@ if (!user) return null;
 
                         {showExaminerRefusal ? (
                           <button
-                            onClick={() => requestExaminerRefusalAsBorrower(b)}
+                            onClick={() => { setRefusalOpenId(b.id); setRefusalReason(""); setRefusalNote(""); }}
                             disabled={examinerRefusalInFlight[b.id]}
                             title="Examiner refused the road test. Only use this when BOTH parties have checked in and the examiner/registry refuses the test at the scheduled start time."
                             style={{
@@ -723,6 +926,60 @@ if (!user) return null;
                             {examinerRefusalInFlight[b.id] ? "Submitting…" : "Examiner refused"}
                           </button>
                         ) : null}
+
+                        {refusalOpenId === b.id ? (
+                          <div style={{ marginTop: 10, border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
+                            <div style={{ fontWeight: 700, fontSize: 15 }}>Examiner refuses test</div>
+                            <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, fontSize: 13 }}>
+                              This flags the booking for review. It does not auto-settle the booking.
+                            </div>
+                            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "motorcycle_issue"} onChange={() => setRefusalReason("motorcycle_issue")} />
+                                <span>Issue with the motorcycle</span>
+                              </label>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "not_ready"} onChange={() => setRefusalReason("not_ready")} />
+                                <span>Test-taker not ready today</span>
+                              </label>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "registry_reschedule"} onChange={() => setRefusalReason("registry_reschedule")} />
+                                <span>Registry rescheduled / examiner unavailable</span>
+                              </label>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "weather_conditions"} onChange={() => setRefusalReason("weather_conditions")} />
+                                <span>Weather / road conditions</span>
+                              </label>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "other"} onChange={() => setRefusalReason("other")} />
+                                <span>Other</span>
+                              </label>
+                            </div>
+                            <textarea
+                              value={refusalNote}
+                              onChange={(e) => setRefusalNote(e.target.value)}
+                              placeholder="Optional note for review"
+                              rows={3}
+                              style={{ marginTop: 10, width: "100%", border: "1px solid #cbd5e1", borderRadius: 12, padding: 10, font: "inherit" }}
+                            />
+                            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button
+                                onClick={() => requestExaminerRefusalAsBorrower(b)}
+                                disabled={examinerRefusalInFlight[b.id] || !refusalReason}
+                                style={{ padding: "10px 14px", borderRadius: 12, border: "1px solid #0f172a", background: "#0f172a", color: "white", fontWeight: 800, cursor: "pointer", opacity: examinerRefusalInFlight[b.id] || !refusalReason ? 0.6 : 1 }}
+                              >
+                                {examinerRefusalInFlight[b.id] ? "Submitting…" : "Submit for review"}
+                              </button>
+                              <button
+                                onClick={() => { setRefusalOpenId(null); setRefusalReason(""); setRefusalNote(""); }}
+                                style={{ padding: "10px 14px", borderRadius: 12, border: "1px solid #cbd5e1", background: "white", fontWeight: 700, cursor: "pointer" }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
 
                         {(fmBorrower || fmOwner) ? (
                           <div style={{ marginTop: 6, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
@@ -762,6 +1019,95 @@ if (!user) return null;
                     </button>
                     ) : null}
                   </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+
+      {/* Under Review */}
+      <div style={cardShell}>
+        <div style={{ fontWeight: 600, fontSize: 18 }}>Under Review</div>
+        <div style={{ marginTop: 6, color: "#475569", fontWeight: 600 }}>
+          Examiner-refusal bookings live here while support reviews the information provided by both parties.
+        </div>
+
+        {underReview.length === 0 ? (
+          <div style={{ marginTop: 12, color: "#64748b", fontWeight: 600 }}>No bookings under review.</div>
+        ) : (
+          <div style={{ marginTop: 12 }}>
+            {underReview.map((b) => {
+              const borrowerChecked = hasBorrowerCheckedIn(b);
+              const ownerChecked = hasOwnerCheckedIn(b);
+              const borrowerConfirmed = !!b.borrower_confirmed_complete;
+              const ownerPossession = !!b.owner_confirmed_complete;
+              const messagesAllowed = !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
+
+              return (
+                <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
+                  <div style={{ fontWeight: 600 }}>Booking {shortId(b.id)}</div>
+                  <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>
+                    scheduled: {fmtDateTime(scheduledIsoFor(b))} • bike: {shortId(b.bike_id)}
+                  </div>
+
+                  <div style={{ marginTop: 10, fontWeight: 600, color: "#0f172a" }}>
+                    Your check-in: {borrowerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Mentor check-in: {ownerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Your completion: {borrowerConfirmed ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
+                    Mentor possession: {ownerPossession ? "✅" : "—"}
+                  </div>
+
+                  <div style={{ marginTop: 10, color: "#7c2d12", fontWeight: 700, fontSize: 13, lineHeight: 1.55, maxWidth: 760 }}>
+                    This booking is under review after an examiner refusal. No further in-app actions are required while support reviews the information from both parties. If needed, email support with any extra details.
+                  </div>
+
+                  <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {messagesAllowed ? (
+                      <button
+                        onClick={() => setOpenMsgId((cur) => (cur === b.id ? null : b.id))}
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: 14,
+                          border: "1px solid #cbd5e1",
+                          background: "white",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {openMsgId === b.id ? (
+                          "Hide messages"
+                        ) : hasUnreadMessages(b.id) ? (
+                          <>
+                            Messages <span style={newBadge}>New</span>
+                          </>
+                        ) : (
+                          "Messages"
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {openMsgId === b.id && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        border: "1px solid #e2e8f0",
+                        borderRadius: 14,
+                        padding: 12,
+                        background: "#f8fafc",
+                      }}
+                    >
+                     <BookingMessages
+                       bookingId={b.id}
+                       meId={b.borrower_id}
+                       otherUserId={b.owner_id}
+                       otherLabel="Mentor"
+                       onMarkSeen={(latestIso) => markMessagesSeen(b.id, latestIso)}
+                     />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -820,6 +1166,12 @@ if (!user) return null;
                     Your completion: {borrowerConfirmed ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
                     Mentor possession: {ownerPossession ? "✅" : "—"}
                   </div>
+
+                  {b.needs_review && b.review_reason === "examiner_refusal" ? (
+                    <div style={{ marginTop: 10, color: "#7c2d12", fontWeight: 700, fontSize: 13 }}>
+                      This booking has been flagged for review after an examiner refusal. If needed, email support with any extra details.
+                    </div>
+                  ) : null}
 
                   <div style={{ marginTop: 10, color: "#475569", fontWeight: 600, fontSize: 13 }}>
                     Tip: both parties must check in before you can confirm completion.{' '}
@@ -893,7 +1245,7 @@ if (!user) return null;
 
       {showExaminerRefusal ? (
         <button
-          onClick={() => requestExaminerRefusalAsBorrower(b)}
+          onClick={() => { setRefusalOpenId(b.id); setRefusalReason(""); setRefusalNote(""); }}
           disabled={examinerRefusalInFlight[b.id]}
           title="Examiner refused the road test. Only use this when BOTH parties have checked in and the examiner/registry refuses the test at the scheduled start time."
           style={{
@@ -909,6 +1261,60 @@ if (!user) return null;
           {examinerRefusalInFlight[b.id] ? "Submitting…" : "Examiner refused"}
         </button>
       ) : null}
+
+                        {refusalOpenId === b.id ? (
+                          <div style={{ marginTop: 10, border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
+                            <div style={{ fontWeight: 700, fontSize: 15 }}>Examiner refuses test</div>
+                            <div style={{ marginTop: 6, color: "#475569", fontWeight: 600, fontSize: 13 }}>
+                              This flags the booking for review. It does not auto-settle the booking.
+                            </div>
+                            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "motorcycle_issue"} onChange={() => setRefusalReason("motorcycle_issue")} />
+                                <span>Issue with the motorcycle</span>
+                              </label>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "not_ready"} onChange={() => setRefusalReason("not_ready")} />
+                                <span>Test-taker not ready today</span>
+                              </label>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "registry_reschedule"} onChange={() => setRefusalReason("registry_reschedule")} />
+                                <span>Registry rescheduled / examiner unavailable</span>
+                              </label>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "weather_conditions"} onChange={() => setRefusalReason("weather_conditions")} />
+                                <span>Weather / road conditions</span>
+                              </label>
+                              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <input type="radio" name={`borrower-refusal-${b.id}`} checked={refusalReason === "other"} onChange={() => setRefusalReason("other")} />
+                                <span>Other</span>
+                              </label>
+                            </div>
+                            <textarea
+                              value={refusalNote}
+                              onChange={(e) => setRefusalNote(e.target.value)}
+                              placeholder="Optional note for review"
+                              rows={3}
+                              style={{ marginTop: 10, width: "100%", border: "1px solid #cbd5e1", borderRadius: 12, padding: 10, font: "inherit" }}
+                            />
+                            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button
+                                onClick={() => requestExaminerRefusalAsBorrower(b)}
+                                disabled={examinerRefusalInFlight[b.id] || !refusalReason}
+                                style={{ padding: "10px 14px", borderRadius: 12, border: "1px solid #0f172a", background: "#0f172a", color: "white", fontWeight: 800, cursor: "pointer", opacity: examinerRefusalInFlight[b.id] || !refusalReason ? 0.6 : 1 }}
+                              >
+                                {examinerRefusalInFlight[b.id] ? "Submitting…" : "Submit for review"}
+                              </button>
+                              <button
+                                onClick={() => { setRefusalOpenId(null); setRefusalReason(""); setRefusalNote(""); }}
+                                style={{ padding: "10px 14px", borderRadius: 12, border: "1px solid #cbd5e1", background: "white", fontWeight: 700, cursor: "pointer" }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
 
       {(fmBorrower || fmOwner) ? (
         <div style={{ marginTop: 6, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
@@ -993,8 +1399,16 @@ if (!user) return null;
                         opacity: isBusy ? 0.6 : 1,
                       }}
                     >
-                      {openMsgId === b.id ? "Hide messages" : "Messages"}
-                    </button>
+                       {openMsgId === b.id ? (
+                         "Hide messages"
+                       ) : hasUnreadMessages(b.id) ? (
+                         <>
+                           Messages <span style={newBadge}>New</span>
+                         </>
+                       ) : (
+                           "Messages"
+                        )}                    
+                      </button>
                   ) : (
                     <div style={{ color: "#64748b", fontWeight: 700, fontSize: 12 }}>
                       Messages unlock once the booking is confirmed (both paid).
@@ -1098,7 +1512,13 @@ if (!user) return null;
                         background: "#f8fafc",
                       }}
                     >
-                      <BookingMessages bookingId={b.id} meId={b.borrower_id} otherUserId={b.owner_id} otherLabel="Mentor" />
+                    <BookingMessages
+                      bookingId={b.id}
+                      meId={b.borrower_id}
+                      otherUserId={b.owner_id}
+                      otherLabel="Mentor"
+                      onMarkSeen={(latestIso) => markMessagesSeen(b.id, latestIso)}
+                     />
                     </div>
                   )}
                 </div>

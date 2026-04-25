@@ -133,14 +133,6 @@ function formatAdvanceNotice(hours: number | null | undefined) {
   return `${hours}h notice`;
 }
 
-function isUsefulNote(value: string | null | undefined) {
-  const text = (value || "").trim();
-  if (!text) return false;
-  if (text.toLowerCase() === "test") return false;
-  if (text.length < 12) return false;
-  return true;
-}
-
 export default function Browse() {
   const [bikes, setBikes] = useState<BikeRow[]>([]);
   const [reviews, setReviews] = useState<ReviewAgg[]>([]);
@@ -250,8 +242,11 @@ export default function Browse() {
   }, [reviews]);
 
   const cityOptions = useMemo(() => {
-    if (province === "AB") {
-      return ["All", ...getLaunchCityOptions("AB")];
+    if (province !== "All") {
+      const launchOptions = getLaunchCityOptions(province);
+      if (launchOptions.length) {
+        return ["All", ...launchOptions];
+      }
     }
 
     const s = new Set<string>();
@@ -543,7 +538,7 @@ export default function Browse() {
         >
           No bikes listed here yet.
           <div style={{ marginTop: 6, color: "#64748b", fontWeight: 750 }}>
-            We’re expanding across Alberta. If you have a road-test-ready bike, you can be one of the first mentors in this area and earn about $100 per road test.
+            If you have a road-test-ready bike, you can be one of the first mentors in this area and earn about $100 per road test.
           </div>
         </div>
       ) : (
@@ -572,7 +567,7 @@ export default function Browse() {
             const availabilityText = owner ? formatAvailability(owner) : "";
             const noticeText = owner ? formatAdvanceNotice(owner.advance_notice_hours) : "";
             const notesText = (owner?.availability_notes || "").trim();
-            const showNotes = isUsefulNote(notesText);
+            const showNotes = false;
 
             return (
               <Link
@@ -683,113 +678,113 @@ export default function Browse() {
 
                   <div style={{ marginTop: 6, color: "#64748b", fontWeight: 800 }}>{shortMeta(b)}</div>
 
-                 {owner ? (
-  <div
-    style={{
-      marginTop: 10,
-      padding: 12,
-      borderRadius: 14,
-      border: "none",
-      background: "#fbfdff",
-    }}
-  >
-    <div style={{ color: "#0f172a", fontWeight: 950, fontSize: 15 }}>
-      {mentorName || "Mentor"}
-    </div>
+                  {owner ? (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        padding: 12,
+                        borderRadius: 14,
+                        border: "none",
+                        background: "#fbfdff",
+                      }}
+                    >
+                      <div style={{ color: "#0f172a", fontWeight: 950, fontSize: 15 }}>
+                        {mentorName || "Mentor"}
+                      </div>
 
-    <div style={{ marginTop: 2, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
-     {mentorYears ? `${mentorYears} riding` : "Mentor"}
-    </div>
+                      <div style={{ marginTop: 2, color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+                        {mentorYears ? `${mentorYears} riding` : "Mentor"}
+                      </div>
 
-    {serviceCitiesText ? (
-      <div style={{ marginTop: 10 }}>
-        <div
-          style={{
-            color: "#64748b",
-            fontWeight: 700,
-            fontSize: 11,
-            letterSpacing: ".03em",
-          }}
-        >
-          Serves
-        </div>
-        <div style={{ marginTop: 2, color: "#1e293b", fontWeight: 750, fontSize: 13, lineHeight: 1.4 }}>
-          {serviceCitiesText}
-        </div>
-      </div>
-    ) : null}
+                      {serviceCitiesText ? (
+                        <div style={{ marginTop: 10 }}>
+                          <div
+                            style={{
+                              color: "#64748b",
+                              fontWeight: 700,
+                              fontSize: 11,
+                              letterSpacing: ".03em",
+                            }}
+                          >
+                            Serves
+                          </div>
+                          <div style={{ marginTop: 2, color: "#1e293b", fontWeight: 750, fontSize: 13, lineHeight: 1.4 }}>
+                            {serviceCitiesText}
+                          </div>
+                        </div>
+                      ) : null}
 
-    {availabilityText ? (
-      <div style={{ marginTop: 8 }}>
-        <div
-          style={{
-            color: "#64748b",
-            fontWeight: 700,
-            fontSize: 11,
-            letterSpacing: ".03em",
-          }}
-        >
-          Available
-        </div>
-        <div style={{ marginTop: 2, color: "#334155", fontWeight: 750, fontSize: 13, lineHeight: 1.4 }}>
-          {availabilityText}
-        </div>
-      </div>
-    ) : null}
+                      {availabilityText ? (
+                        <div style={{ marginTop: 8 }}>
+                          <div
+                            style={{
+                              color: "#64748b",
+                              fontWeight: 700,
+                              fontSize: 11,
+                              letterSpacing: ".03em",
+                            }}
+                          >
+                            Available
+                          </div>
+                          <div style={{ marginTop: 2, color: "#334155", fontWeight: 750, fontSize: 13, lineHeight: 1.4 }}>
+                            {availabilityText}
+                          </div>
+                        </div>
+                      ) : null}
 
-    {noticeText ? (
-      <div style={{ marginTop: 8 }}>
-        <div
-          style={{
-            color: "#64748b",
-            fontWeight: 700,
-            fontSize: 11,
-            letterSpacing: ".03em",
-          }}
-        >
-          Notice
-        </div>
-        <div style={{ marginTop: 2, color: "#334155", fontWeight: 750, fontSize: 13 }}>
-          {noticeText}
-        </div>
-      </div>
-    ) : null}
+                      {noticeText ? (
+                        <div style={{ marginTop: 8 }}>
+                          <div
+                            style={{
+                              color: "#64748b",
+                              fontWeight: 700,
+                              fontSize: 11,
+                              letterSpacing: ".03em",
+                            }}
+                          >
+                            Notice
+                          </div>
+                          <div style={{ marginTop: 2, color: "#334155", fontWeight: 750, fontSize: 13 }}>
+                            {noticeText}
+                          </div>
+                        </div>
+                      ) : null}
 
-    {Array.isArray(owner.travel_quadrants) && owner.travel_quadrants.length ? (
-      <div style={{ marginTop: 8 }}>
-        <div
-          style={{
-            color: "#94a3b8",
-            fontWeight: 700,
-            fontSize: 11,
-            letterSpacing: ".03em",
-          }}
-        >
-          Comfort zones
-        </div>
-        <div style={{ marginTop: 2, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
-          {owner.travel_quadrants.join(" • ")}
-        </div>
-      </div>
-    ) : null}
+                      {Array.isArray(owner.travel_quadrants) && owner.travel_quadrants.length ? (
+                        <div style={{ marginTop: 8 }}>
+                          <div
+                            style={{
+                              color: "#94a3b8",
+                              fontWeight: 700,
+                              fontSize: 11,
+                              letterSpacing: ".03em",
+                            }}
+                          >
+                            Comfort zones
+                          </div>
+                          <div style={{ marginTop: 2, color: "#64748b", fontWeight: 700, fontSize: 12 }}>
+                            {owner.travel_quadrants.join(" • ")}
+                          </div>
+                        </div>
+                      ) : null}
 
-    {showNotes ? (
-      <div
-        style={{
-          marginTop: 10,
-          paddingTop: 8,
-          borderTop: "1px solid #e2e8f0",
-          color: "#64748b",
-          fontWeight: 750,
-          fontSize: 12,
-          lineHeight: 1.45,
-        }}
-      >
-        {notesText}
-      </div>
-    ) : null}
-  </div>
-) : null}
+                      {showNotes ? (
+                        <div
+                          style={{
+                            marginTop: 10,
+                            paddingTop: 8,
+                            borderTop: "1px solid #e2e8f0",
+                            color: "#64748b",
+                            fontWeight: 750,
+                            fontSize: 12,
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {notesText}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   <div
                     style={{

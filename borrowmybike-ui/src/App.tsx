@@ -14,6 +14,7 @@ import OwnerStart from "./pages/OwnerStart";
 import OwnerNew from "./pages/OwnerNew";
 import Legal from "./pages/Legal";
 import Dev from "./pages/Dev";
+import AdminReviews from "./pages/AdminReviews";
 
 import Rules from "./pages/Rules";
 
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="/owner/new" element={<Navigate to="/owners/new" replace />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/legal" element={<Legal />} />
+        <Route path="/admin/reviews" element={<AdminReviews />} />
 
         {showDevRoute && <Route path="/dev" element={<Dev />} />}
 
