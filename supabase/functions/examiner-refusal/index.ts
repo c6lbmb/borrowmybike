@@ -7,6 +7,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sendEmail } from "../_shared/sendEmail.ts";
 
 type Json = Record<string, unknown>;
 
@@ -23,12 +24,15 @@ function json(status: number, body: Json) {
 function reasonLabel(reasonCode: string): string {
   switch (reasonCode) {
     case "motorcycle_issue":
+    case "motorcycle":
       return "Issue with the motorcycle (not ready / not acceptable today)";
     case "not_ready":
+    case "test_taker":
       return "Test-taker not ready (gear / paperwork / eligibility)";
     case "registry_reschedule":
       return "Registry rescheduled / examiner unavailable";
     case "weather_conditions":
+    case "unavoidable":
       return "Weather / road conditions";
     case "other":
       return "Other";
@@ -79,12 +83,15 @@ Deno.serve(async (req) => {
     const { data: booking, error: bErr } = await supabase
       .from("bookings")
       .select(
-        "id,borrower_id,owner_id,status,borrower_paid,owner_deposit_paid,cancelled,settled,completed,borrower_checked_in,owner_checked_in,borrower_checked_in_at,owner_checked_in_at,scheduled_start_at,booking_date"
+        "id,borrower_id,owner_id,status,borrower_paid,owner_deposit_paid,cancelled,settled,completed,borrower_checked_in,owner_checked_in,borrower_checked_in_at,owner_checked_in_at,scheduled_start_at,booking_date,tag_reason"
       )
       .eq("id", bookingId)
       .maybeSingle();
 
     if (bErr || !booking) return json(404, { error: "Booking not found" });
+
+    const alreadyUnderReview =
+  booking.needs_review === true && booking.review_reason === "examiner_refusal";
 
     const isBorrower = booking.borrower_id === callerId;
     const isOwner = booking.owner_id === callerId;
@@ -110,12 +117,19 @@ Deno.serve(async (req) => {
 
     const submittedBy = isBorrower ? "borrower" : "owner";
     const tag = `Examiner refused road test — ${reasonLabel(reasonCode)} (submitted by ${submittedBy})${note ? ` — Note: ${note}` : ""}`;
+    const existingTagReason = typeof (booking as any)?.tag_reason === "string" ? (booking as any).tag_reason.trim() : "";
+    const combinedTagReason = existingTagReason
+      ? existingTagReason.includes(tag)
+        ? existingTagReason
+        : `${existingTagReason}
+${tag}`
+      : tag;
 
     const update: any = {
       needs_review: true,
       review_reason: "examiner_refusal",
       needs_rebooking: true,
-      tag_reason: tag,
+      tag_reason: combinedTagReason,
     };
 
     if (reasonCode === "motorcycle_issue") {
@@ -127,7 +141,60 @@ Deno.serve(async (req) => {
     const { error: uErr } = await supabase.from("bookings").update(update).eq("id", bookingId);
     if (uErr) return json(500, { error: "Update failed", message: uErr.message });
 
-    return json(200, { ok: true, booking_id: bookingId, submitted_by: submittedBy });
+    if (!alreadyUnderReview) {
+  try {
+    // sendEmail(...)
+  } catch (emailErr) {
+    console.error("examiner-refusal review alert email failed", emailErr);
+  }
+}
+
+     // Notify support that a booking now needs manual review.
+    try {
+      const localTime = startIso
+        ? new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Edmonton",
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          }).format(new Date(startIso))
+        : "Unknown";
+
+      const appBase = "https://borrowmybike.ca";
+      const reviewUrl = `${appBase}/admin/reviews`;
+
+      await sendEmail({
+        to: "support@borrowmybike.ca",
+        subject: "Action required: booking under review",
+        html: `
+          <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111;">
+            <h2 style="margin:0 0 12px;">Booking flagged for manual review</h2>
+            <p style="margin:0 0 12px;">
+              A booking has been flagged for review after an examiner refusal.
+            </p>
+
+            <p style="margin:0 0 6px;"><strong>Booking ID:</strong> ${bookingId}</p>
+            <p style="margin:0 0 6px;"><strong>Scheduled time (Edmonton):</strong> ${localTime}</p>
+            <p style="margin:0 0 6px;"><strong>Submitted by:</strong> ${submittedBy}</p>
+            <p style="margin:0 0 6px;"><strong>Reason:</strong> ${reasonLabel(reasonCode)}</p>
+            <p style="margin:0 0 12px;"><strong>Note:</strong> ${note || "—"}</p>
+
+            <p style="margin:16px 0;">
+              <a href="${reviewUrl}" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#fff;text-decoration:none;border-radius:8px;">
+                Open admin review queue
+              </a>
+            </p>
+          </div>
+        `,
+      });
+    } catch (emailErr) {
+      console.error("examiner-refusal review alert email failed", emailErr);
+    }
+
+    return json(200, { ok: true, booking_id: bookingId, submitted_by: submittedBy, message: "Booking flagged for review." });
   } catch (e: any) {
     return json(500, { error: "Internal Server Error", message: e?.message || String(e) });
   }

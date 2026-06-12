@@ -184,41 +184,92 @@ serve(async (req) => {
   }
 
   if (decision === "owner_fault") {
-    const { error: uErr } = await db.from("bookings").update({
+    const patch = {
       needs_review: false,
-      treat_as_owner_no_show: true,
+      treat_as_owner_no_show: false,
       treat_as_borrower_no_show: false,
-    }).eq("id", booking_id);
+      no_show_claimed_at: null,
+      no_show_claimed_by: null,
+      bike_invalid: true,
+      bike_invalid_reason: (note ?? "Admin resolved review as owner_fault").toString(),
+      bike_invalid_at: new Date().toISOString(),
+      review_reason: "owner_fault",
+    };
 
+    const { error: uErr } = await db.from("bookings").update(patch).eq("id", booking_id);
     if (uErr) return json(500, { error: "Failed to update booking", details: uErr });
 
     const settle = await callSettleBooking(booking_id);
+
+    if (!settle.ok) {
+      await db.from("bookings").update({
+        needs_review: true,
+        review_reason: "examiner_refusal",
+        treat_as_owner_no_show: false,
+        treat_as_borrower_no_show: false,
+        bike_invalid: false,
+        bike_invalid_reason: null,
+        bike_invalid_at: null,
+      }).eq("id", booking_id);
+
+      return json(500, {
+        booking_id,
+        decision,
+        error: "Owner fault settlement failed; review restored.",
+        settle,
+      });
+    }
+
     await logAction(booking_id, adminCheck.admin_user_id, "owner_fault", note);
 
     return json(200, {
       booking_id,
       decision,
-      message: "Owner fault approved. Settlement attempted.",
+      message: "Owner fault approved and settled.",
       settle,
     });
   }
 
   if (decision === "borrower_fault") {
-    const { error: uErr } = await db.from("bookings").update({
+    const patch = {
       needs_review: false,
-      treat_as_borrower_no_show: true,
+      treat_as_borrower_no_show: false,
       treat_as_owner_no_show: false,
-    }).eq("id", booking_id);
+      no_show_claimed_at: null,
+      no_show_claimed_by: null,
+      bike_invalid: false,
+      bike_invalid_reason: null,
+      bike_invalid_at: null,
+      review_reason: "borrower_fault",
+    };
 
+    const { error: uErr } = await db.from("bookings").update(patch).eq("id", booking_id);
     if (uErr) return json(500, { error: "Failed to update booking", details: uErr });
 
     const settle = await callSettleBooking(booking_id);
+
+    if (!settle.ok) {
+      await db.from("bookings").update({
+        needs_review: true,
+        review_reason: "examiner_refusal",
+        treat_as_owner_no_show: false,
+        treat_as_borrower_no_show: false,
+      }).eq("id", booking_id);
+
+      return json(500, {
+        booking_id,
+        decision,
+        error: "Borrower fault settlement failed; review restored.",
+        settle,
+      });
+    }
+
     await logAction(booking_id, adminCheck.admin_user_id, "borrower_fault", note);
 
     return json(200, {
       booking_id,
       decision,
-      message: "Borrower fault approved. Settlement attempted.",
+      message: "Borrower fault approved and settled.",
       settle,
     });
   }

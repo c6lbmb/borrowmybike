@@ -468,6 +468,109 @@ const bookingDateText = formatBookingTime(
   });
 }
 
+async function sendCancellerRefundEmailIfNeeded(args: {
+  supabase: any;
+  bookingId: string;
+  cancellerRole: "borrower" | "owner";
+  refundAmount: number;
+  refundVia: string | null;
+}) {
+  const { supabase, bookingId, cancellerRole, refundAmount, refundVia } = args;
+
+  // Only send this email for real Stripe/card refunds.
+  if (refundVia !== "stripe" || refundAmount <= 0) return;
+
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, borrower_id, owner_id, booking_date, scheduled_start_at, province")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) {
+    console.error("❌ refund email booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  const userId = cancellerRole === "borrower" ? booking?.borrower_id : booking?.owner_id;
+  if (!userId) return;
+
+  const { data: user, error: userError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (userError) {
+    console.error("❌ refund email user lookup failed:", userError);
+    throw userError;
+  }
+
+  if (!user?.email) return;
+
+  const notificationType =
+    cancellerRole === "borrower"
+      ? "borrower_cancel_refund_processed"
+      : "owner_cancel_refund_processed";
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: user.id,
+    notificationType,
+  });
+
+  if (alreadySent) return;
+
+  const userName =
+    user.first_name?.trim() ||
+    user.full_name?.trim() ||
+    "there";
+
+  const bookingProvince =
+    (booking.province || "").toUpperCase() || "AB";
+
+  const bookingDateText = formatBookingTime(
+    booking.scheduled_start_at ?? booking.booking_date,
+    bookingProvince
+  );
+
+  await sendEmail({
+    to: user.email,
+    subject: "Your BorrowMyBike refund has been processed",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${userName},</p>
+
+        <p>Your cancellation refund has been processed.</p>
+
+        <p><strong>Scheduled time:</strong> ${bookingDateText}</p>
+        <p><strong>Refund amount:</strong> $${refundAmount.toFixed(2)}</p>
+
+        <p>This amount was returned to your original payment method.</p>
+
+        <p>Please note that card refunds can take a few business days to appear depending on your bank.</p>
+
+        <p>If you have any questions, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: user.id,
+    emailTo: user.email,
+    notificationType,
+    meta: {
+      source: "cancel-booking",
+      canceller_role: cancellerRole,
+      refund_amount: refundAmount,
+      refund_via: refundVia,
+      booking_date: booking.booking_date ?? null,
+    },
+  });
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
@@ -796,6 +899,18 @@ return json(200, {
         refund_amount_cents: cents(cancellerRefund),
       })
       .eq("id", booking_id);
+  }
+
+    try {
+    await sendCancellerRefundEmailIfNeeded({
+      supabase,
+      bookingId: booking_id,
+      cancellerRole: canceller as "borrower" | "owner",
+      refundAmount: cancellerRefund,
+      refundVia: refundResult?.via ?? null,
+    });
+  } catch (emailError) {
+    console.error("❌ cancellation refund email failed:", emailError);
   }
 
 // 4) record platform income payment row

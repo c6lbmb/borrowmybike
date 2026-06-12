@@ -124,10 +124,40 @@ function acceptanceHoursForBooking(booking: { booking_date?: string | null; crea
   return 8;
 }
 
+type RegistryEmailRow = {
+  name?: string | null;
+  city?: string | null;
+  address?: string | null;
+  province?: string | null;
+  postal_code?: string | null;
+};
+
+type BookingWithRegistry = {
+  registry_quadrant?: string | null;
+  registries?: RegistryEmailRow | null;
+};
+
+function formatRegistryText(booking: BookingWithRegistry) {
+  const r = booking.registries ?? null;
+  const name = (r?.name || "").trim();
+  const city = (r?.city || "").trim();
+  const province = (r?.province || "").trim();
+  const address = (r?.address || "").trim();
+  const quadrant = (booking.registry_quadrant || "").trim();
+
+  const title =
+    name && city && province ? `${name} — ${city}, ${province}` :
+    name && city ? `${name} — ${city}` :
+    name ||
+    (quadrant ? `Registry area: ${quadrant}` : "the selected registry");
+
+  return address ? `${title}<br />${address}` : title;
+}
+
 async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at, created_at")
+    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at, created_at, registry_id, registry_quadrant, registries:registry_id(name,city,address,province,postal_code)")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -178,7 +208,7 @@ async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
 
   const acceptanceHours = acceptanceHoursForBooking(booking);
 
-  const registryText = "the selected registry";
+  const registryText = formatRegistryText(booking as BookingWithRegistry);
 
   await sendEmail({
     to: owner.email,
@@ -223,10 +253,117 @@ async function sendOwnerRequestEmailIfNeeded(bookingId: string) {
     },
   });
 }
+
+async function sendBorrowerRequestSentEmailIfNeeded(bookingId: string) {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at, created_at, registry_id, registry_quadrant, registries:registry_id(name,city,address,province,postal_code)")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (bookingError) {
+    console.error("❌ borrower request-sent booking lookup failed:", bookingError);
+    throw bookingError;
+  }
+
+  if (!booking?.borrower_id) {
+    console.warn("⚠️ booking missing borrower_id, skipping borrower request-sent email", { bookingId });
+    return;
+  }
+
+  const { data: borrower, error: borrowerError } = await supabase
+    .from("users")
+    .select("id, first_name, full_name, email")
+    .eq("id", booking.borrower_id)
+    .maybeSingle();
+
+  if (borrowerError) {
+    console.error("❌ borrower lookup failed for request-sent email:", borrowerError);
+    throw borrowerError;
+  }
+
+  if (!borrower?.email) {
+    console.warn("⚠️ borrower missing email, skipping borrower request-sent email", {
+      bookingId,
+      borrowerId: booking.borrower_id,
+    });
+    return;
+  }
+
+  const alreadySent = await hasNotificationBeenSent({
+    supabase,
+    bookingId: booking.id,
+    userId: borrower.id,
+    notificationType: "request_created_borrower",
+  });
+
+  if (alreadySent) {
+    console.log("ℹ️ borrower request-sent email already sent, skipping", {
+      bookingId,
+      borrowerId: borrower.id,
+    });
+    return;
+  }
+
+  const borrowerName =
+    borrower.first_name?.trim() ||
+    borrower.full_name?.trim() ||
+    "there";
+
+  const bookingDateText = formatBookingTime(scheduledIsoFor(booking), "AB");
+  const acceptanceHours = acceptanceHoursForBooking(booking);
+
+  await sendEmail({
+    to: borrower.email,
+    subject: "Your BorrowMyBike request has been sent",
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <p>Hi ${borrowerName},</p>
+
+        <p>Your payment was received and your BorrowMyBike road-test request has been sent to the mentor.</p>
+
+        <p>
+          <strong>Registry:</strong> ${formatRegistryText(booking as BookingWithRegistry)}<br />
+          <strong>Test time:</strong> ${bookingDateText}
+        </p>
+
+        <p>
+          The mentor now has ${acceptanceHours} hours to accept or decline your request before it expires automatically.
+        </p>
+
+        <p>
+          If the mentor accepts, you’ll be notified and the booking will move forward. If they don’t accept in time, you’ll need to choose another available bike or contact support so we can help with the next step.
+        </p>
+
+        <p>
+          <a href="https://borrowmybike.ca/dashboard" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+            View request
+          </a>
+        </p>
+
+        <p>If you didn’t expect this email, contact support@borrowmybike.ca.</p>
+      </div>
+    `,
+  });
+
+  await logNotificationSent({
+    supabase,
+    bookingId: booking.id,
+    userId: borrower.id,
+    emailTo: borrower.email,
+    notificationType: "request_created_borrower",
+    meta: {
+      source: "stripe-webhook",
+      booking_date: booking.booking_date ?? null,
+      acceptance_hours: acceptanceHours,
+    },
+  });
+}
+
 async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at")
+    .select("id, owner_id, borrower_id, booking_date, scheduled_start_at, registry_id, registry_quadrant, registries:registry_id(name,city,address,province,postal_code)")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -291,6 +428,7 @@ async function sendBorrowerAcceptedEmailIfNeeded(bookingId: string) {
         <p>Your BorrowMyBike request was accepted by the mentor.</p>
 
         <p>
+          <strong>Registry:</strong> ${formatRegistryText(booking as BookingWithRegistry)}<br />
           <strong>Test time:</strong> ${bookingDateText}
         </p>
 
@@ -393,12 +531,18 @@ serve(async (req: Request) => {
       if (bookingError) console.error("bookings update error:", bookingError);
     }
     if (bookingId && paymentType === "borrower_booking") {
-  try {
-    await sendOwnerRequestEmailIfNeeded(bookingId);
-  } catch (emailError) {
-    console.error("❌ owner request email failed:", emailError);
-  }
-}
+      try {
+        await sendOwnerRequestEmailIfNeeded(bookingId);
+      } catch (emailError) {
+        console.error("❌ owner request email failed:", emailError);
+      }
+
+      try {
+        await sendBorrowerRequestSentEmailIfNeeded(bookingId);
+      } catch (emailError) {
+        console.error("❌ borrower request-sent email failed:", emailError);
+      }
+    }
      if (bookingId && paymentType === "owner_deposit") {
        try {
          await sendBorrowerAcceptedEmailIfNeeded(bookingId);

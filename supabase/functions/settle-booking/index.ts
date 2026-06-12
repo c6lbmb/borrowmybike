@@ -308,7 +308,7 @@ async function returnOwnerDeposit(args: {
       ok: true,
       method: "credit",
       credit_id: creditRow.id,
-      amount: OWNER_DEPOSIT_AMOUNT,
+      amount: OWNER_DEPOSIT_AMOUNT, 
       currency: "CAD",
     };
   }
@@ -652,7 +652,12 @@ serve(async (req: Request) => {
       });
 
       // Return/hold owner's deposit based on choice (refund or keep credit)
-      const ownerDepositReturn = await returnOwnerDeposit({ booking_id, owner_id: booking.owner_id, depositChoice: "keep" });
+      const ownerDepositReturn = await returnOwnerDeposit({
+        booking_id,
+        owner_id: booking.owner_id,
+        depositChoice: "keep",
+        reasonOverride: "Owner deposit returned after borrower no-show settlement",
+      });
 
       await supabase.from("bookings").update({
         settled: true,
@@ -920,53 +925,30 @@ serve(async (req: Request) => {
       });
     }
 
-    // Owner fault: borrower gets booking fee back (refund or credit fallback), owner outcome recorded.
+    // Owner fault: borrower gets booking fee back as credit + $100 compensation.
+    // Platform keeps $50. Owner loses deposit.
     if (isOwnerFault) {
-      const borrowerPI = booking.stripe_payment_intent_id;
-      let borrowerFeeReturn: any = { performed: false, via: null as string | null };
+      const borrowerFeeReturn = await ensureCreditAvailable({
+        user_id: booking.borrower_id,
+        credit_type: "rebook_credit",
+        amount: BOOKING_FEE_AMOUNT,
+        booking_id,
+        reason: "Owner fault: booking fee returned as credit",
+      });
 
-      if (!borrowerPI || !stripeSecretKey) {
-        // If we cannot refund borrower via Stripe, issue platform credit instead.
-        const borrowerCredit = await ensureCreditAvailable({
-          user_id: booking.borrower_id,
-          credit_type: "BORROWER_REBOOK_CREDIT",
-          amount: BOOKING_FEE_AMOUNT,
-          booking_id,
-          reason: "Owner fault: borrower rebook credit issued (Stripe refund unavailable)",
-        });
-        borrowerFeeReturn = {
-          performed: true,
-          via: "credit",
-          credit_id: borrowerCredit.id,
-        };
-      } else {
-        // Refund borrower fee (idempotent)
-        const refund = await stripeRefundPartial(
-          stripeSecretKey,
-          borrowerPI,
-          cents(BOOKING_FEE_AMOUNT),
-          `refund_owner_fault_${booking_id}`,
-        );
-        borrowerFeeReturn = {
-          performed: true,
-          via: "stripe_refund",
-          refund_id: refund.id,
-          refund_status: refund.status ?? null,
-          refunded_amount_cents: refund.amount ?? cents(BOOKING_FEE_AMOUNT),
-        };
-      }
+      const borrowerCompensation = await ensurePaymentDue({
+        booking_id,
+        payment_type: "borrower_compensation",
+        amount: COMP_AMOUNT,
+        borrower_id: booking.borrower_id,
+        owner_id: booking.owner_id,
+      });
 
       const platformIncome = await ensurePlatformIncomePaid({
         booking_id,
         amount: PLATFORM_INCOME_OWNER_FAULT,
         borrower_id: booking.borrower_id,
         owner_id: booking.owner_id,
-      });
-
-      const ownerDepositReturn = await returnOwnerDeposit({
-        booking_id,
-        owner_id: booking.owner_id,
-        depositChoice: booking.owner_deposit_choice,
       });
 
       const { error: upErr } = await supabase
@@ -976,6 +958,10 @@ serve(async (req: Request) => {
           settled_at: new Date().toISOString(),
           settlement_outcome: "owner_fault",
           settlement_version: SETTLEMENT_VERSION,
+          needs_review: false,
+          review_reason: "owner_fault",
+          treat_as_owner_no_show: false,
+          treat_as_borrower_no_show: false,
         })
         .eq("id", booking_id);
 
@@ -986,7 +972,7 @@ serve(async (req: Request) => {
         actor_role: "system",
         actor_user_id: booking.owner_id,
         action: "settle_owner_fault",
-        note: `owner_fault; borrowerFeeReturn=${borrowerFeeReturn.via ?? "none"}; platformIncome=${PLATFORM_INCOME_OWNER_FAULT}; ownerDepositReturn=${ownerDepositReturn.method ?? "credit"}`,
+        note: `owner_fault; borrowerFeeReturn=credit; borrowerComp=${COMP_AMOUNT}; platformIncome=${PLATFORM_INCOME_OWNER_FAULT}; ownerDepositReturn=forfeited`,
       });
 
       await sendSettlementEmailIfNeeded({
@@ -1000,7 +986,7 @@ serve(async (req: Request) => {
             <p>Hi ${ownerName},</p>
             <p>Your booking was settled as an owner/mentor fault under the platform rules.</p>
             <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
-            <p>The applicable platform outcome has been recorded for this booking.</p>
+            <p>Your deposit was forfeited and the applicable platform outcome has been recorded for this booking.</p>
             <p>If you believe this settlement was made in error, please reply to this email or contact support@borrowmybike.ca to dispute it.</p>
           </div>
         `,
@@ -1018,7 +1004,7 @@ serve(async (req: Request) => {
             <p>Hi ${borrowerName},</p>
             <p>Your booking was settled as an owner/mentor fault.</p>
             <p><strong>Booking:</strong> ${bikeText}<br><strong>Scheduled time:</strong> ${bookingDateText}</p>
-            <p>Your booking fee has been returned ${borrowerFeeReturn.via === "stripe_refund" ? "to your original payment method" : "as platform credit"}.</p>
+            <p>You have been issued a $150 rebook credit for your booking fee, and your $100 compensation payout has been recorded and is being processed.</p>
             <p>If you need another bike, you can browse and submit a new request when ready.</p>
             <p>
               <a href="https://borrowmybike.ca/browse" style="display:inline-block;padding:10px 14px;background:#0b1f3b;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
@@ -1028,15 +1014,16 @@ serve(async (req: Request) => {
             <p>If you have any questions, contact support@borrowmybike.ca.</p>
           </div>
         `,
-        meta: { source: "settle-booking", scenario: "owner_fault", role: "borrower", fee_return_via: borrowerFeeReturn.via },
+        meta: { source: "settle-booking", scenario: "owner_fault", role: "borrower", fee_return_via: "credit" },
       });
 
       return json(200, {
         ok: true,
         booking_id,
         scenario: "owner_fault",
-        borrower_fee_return: borrowerFeeReturn,
-        owner_deposit_return: ownerDepositReturn,
+        borrower_fee_return: { performed: true, via: "credit", credit_id: borrowerFeeReturn.id },
+        borrower_compensation_payout_due: borrowerCompensation,
+        owner_deposit_return: { performed: false, method: "forfeited" },
         platform_income: platformIncome,
       });
     }
@@ -1066,6 +1053,7 @@ if (isBorrowerFault) {
     booking_id,
     owner_id: booking.owner_id,
     depositChoice: "keep",
+    reasonOverride: "Owner deposit returned after borrower-fault settlement",
   });
 
   const { error: upErr } = await supabase
