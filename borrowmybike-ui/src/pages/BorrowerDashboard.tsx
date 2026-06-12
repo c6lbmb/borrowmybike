@@ -1127,6 +1127,7 @@ if (!user) return null;
             {upcoming.map((b) => {
               const isBusy = busyId === b.id;
                   const messagesAllowed = !!b.borrower_paid && !!b.owner_deposit_paid && b.status === "confirmed" && !b.cancelled;
+              const bothPaidConfirmed = messagesAllowed;
 
 
               const ownerChecked = hasOwnerCheckedIn(b);
@@ -1330,7 +1331,7 @@ if (!user) return null;
 })()}
 
                   <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {(borrowerChecked || checkInOpen) && (
+                    {bothPaidConfirmed && !b.completed ? (
                     <button
                       onClick={() => checkInAsTestTaker(b)}
                       disabled={isBusy || borrowerChecked || !checkInOpen}
@@ -1347,15 +1348,15 @@ if (!user) return null;
                         border: "1px solid #cbd5e1",
                         background: borrowerChecked ? "#f8fafc" : "white",
                         fontWeight: 600,
-                        cursor: "pointer",
+                        cursor: borrowerChecked || !checkInOpen ? "not-allowed" : "pointer",
                         opacity: isBusy || borrowerChecked || !checkInOpen ? 0.6 : 1,
                       }}
                     >
-                      {borrowerChecked ? "Checked in" : "Check in"}
+                      {borrowerChecked ? "Checked in" : checkInOpen ? "Check in" : "Check-in opens soon"}
                     </button>
-                  )}
+                  ) : null}
 
-                    {(borrowerConfirmed || canComplete) && (
+                    {bothPaidConfirmed && !b.completed ? (
                     <button
                       onClick={() => confirmTestCompleted(b)}
                       disabled={isBusy || !canComplete}
@@ -1375,13 +1376,13 @@ if (!user) return null;
                         background: "#0f172a",
                         color: "white",
                         fontWeight: 600,
-                        cursor: "pointer",
+                        cursor: canComplete ? "pointer" : "not-allowed",
                         opacity: isBusy || !canComplete ? 0.6 : 1,
                       }}
                     >
                       {borrowerConfirmed ? "Completion confirmed" : "Confirm test completed"}
                     </button>
-                    )}
+                    ) : null}
 
 
                     {messagesAllowed ? (

@@ -15,6 +15,8 @@ export default function AuthPage() {
   const rawMode = (params.get("mode") || "").toLowerCase();
   const mode: AuthMode = rawMode === "signup" ? "signup" : "signin";
 
+  const [fullName, setFullName] = useState("");
+  const [city, setCity] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -31,6 +33,10 @@ export default function AuthPage() {
     setParams(nextParams, { replace: true });
   }
 
+  function getFirstNameFromFullName(value: string) {
+    return value.trim().split(/\s+/)[0] || "";
+  }
+
   async function doSignIn() {
     setBusy(true);
     try {
@@ -43,10 +49,27 @@ export default function AuthPage() {
     }
   }
 
-    async function doSignUp() {
+  async function doSignUp() {
+    const cleanFullName = fullName.trim();
+    const cleanCity = city.trim();
+
+    if (!cleanFullName) {
+      flash(false, "Please enter your full name.");
+      return;
+    }
+
+    if (!cleanCity) {
+      flash(false, "Please enter your city.");
+      return;
+    }
+
     setBusy(true);
     try {
-      const r = await signUp(email, password);
+      const r = await signUp(email, password, {
+        fullName: cleanFullName,
+        firstName: getFirstNameFromFullName(cleanFullName),
+        city: cleanCity,
+      });
       if (!r.ok) return flash(false, r.error || "Sign up failed");
 
       setMsg({
@@ -54,6 +77,8 @@ export default function AuthPage() {
         text: "Account created ✅ Go to your email now and click the confirmation link to activate your BorrowMyBike account. The email may take a minute and could land in spam.",
       });
 
+      setFullName("");
+      setCity("");
       setEmail("");
       setPassword("");
       setMode("signin");
@@ -100,6 +125,20 @@ export default function AuthPage() {
     cursor: "pointer",
   });
 
+  const labelStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#334155",
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    marginTop: 6,
+    padding: 10,
+    borderRadius: 14,
+    border: "1px solid #e2e8f0",
+  };
+
   return (
     <div style={cardStyle}>
       <div
@@ -120,7 +159,7 @@ export default function AuthPage() {
         >
           Sign in
         </button>
-                <button
+        <button
           type="button"
           onClick={() => {
             setMsg(null);
@@ -192,24 +231,43 @@ export default function AuthPage() {
               gap: 10,
             }}
           >
+            {mode === "signup" && (
+              <>
+                <div>
+                  <div style={labelStyle}>Full name</div>
+                  <input
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Full name"
+                    autoComplete="name"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <div style={labelStyle}>City</div>
+                  <input
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="City"
+                    autoComplete="address-level2"
+                    style={inputStyle}
+                  />
+                </div>
+              </>
+            )}
+
             <div>
-              <div style={{ fontSize: 12, fontWeight: 900, color: "#334155" }}>Email</div>
+              <div style={labelStyle}>Email</div>
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="email"
                 autoComplete="email"
-                style={{
-                  width: "100%",
-                  marginTop: 6,
-                  padding: 10,
-                  borderRadius: 14,
-                  border: "1px solid #e2e8f0",
-                }}
+                style={inputStyle}
               />
             </div>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 900, color: "#334155" }}>Password</div>
+              <div style={labelStyle}>Password</div>
               <input
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -221,13 +279,7 @@ export default function AuthPage() {
                     void onPrimaryAction();
                   }
                 }}
-                style={{
-                  width: "100%",
-                  marginTop: 6,
-                  padding: 10,
-                  borderRadius: 14,
-                  border: "1px solid #e2e8f0",
-                }}
+                style={inputStyle}
               />
             </div>
           </div>

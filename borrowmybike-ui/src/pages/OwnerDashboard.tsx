@@ -14,6 +14,15 @@ type LatestMessageMeta = {
   createdAt: string;
 };
 
+type RegistryRow = {
+  id: string;
+  name: string | null;
+  city: string | null;
+  address: string | null;
+  province: string | null;
+  postal_code: string | null;
+};
+
 type BookingRow = {
   id: string;
   bike_id: string;
@@ -27,6 +36,8 @@ type BookingRow = {
   test_taker_intro?: string | null;
   time_window?: string | null;
   registry_quadrant?: string | null;
+  registry_id?: string | null;
+  registries?: RegistryRow | null;
 
   cancelled: boolean;
   settled: boolean;
@@ -95,6 +106,61 @@ function fmtDateTime(iso?: string | null) {
 
 function shortId(id?: string | null) {
   return id ? id.slice(0, 8) + "…" : "—";
+}
+
+function registryFor(b: BookingRow): RegistryRow | null {
+  return b.registries ?? null;
+}
+
+function registryTitleFor(b: BookingRow) {
+  const r = registryFor(b);
+  const name = (r?.name || "").trim();
+  const city = (r?.city || "").trim();
+  const province = (r?.province || "").trim();
+  const quadrant = (b.registry_quadrant || "").trim();
+
+  if (name && city && province) return `${name} — ${city}, ${province}`;
+  if (name && city) return `${name} — ${city}`;
+  if (name) return name;
+  if (quadrant) return `Registry area: ${quadrant}`;
+  return "Registry location not available";
+}
+
+function registryAddressFor(b: BookingRow) {
+  const r = registryFor(b);
+  return (r?.address || "").trim();
+}
+
+function RegistryLocationCard({ booking }: { booking: BookingRow }) {
+  const address = registryAddressFor(booking);
+  const quadrant = (booking.registry_quadrant || "").trim();
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        background: "#f8fafc",
+        border: "1px solid #e2e8f0",
+        borderRadius: 14,
+        padding: 12,
+      }}
+    >
+      <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 15 }}>Meeting location</div>
+      <div style={{ marginTop: 6, color: "#334155", fontWeight: 700, lineHeight: 1.55 }}>
+        {registryTitleFor(booking)}
+      </div>
+      {address ? (
+        <div style={{ marginTop: 4, color: "#475569", fontWeight: 600, lineHeight: 1.55 }}>
+          {address}
+        </div>
+      ) : null}
+      {quadrant ? (
+        <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600, fontSize: 13 }}>
+          Registry area: {quadrant}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function bookingStateLabel(b: BookingRow): string {
@@ -498,7 +564,7 @@ function closeAcceptChecklist() {
       const res = await sb
         .from("bookings")
         .select(
-          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,tag_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,test_taker_intro,time_window,registry_quadrant",
+          "id,bike_id,borrower_id,owner_id,booking_date,scheduled_start_at,cancelled,settled,completed,borrower_paid,owner_deposit_paid,needs_review,review_reason,tag_reason,created_at,borrower_checked_in,owner_checked_in,borrower_confirmed_complete,owner_confirmed_complete,cancelled_by,status,borrower_checked_in_at,owner_checked_in_at,settlement_outcome,treat_as_borrower_no_show,treat_as_owner_no_show,force_majeure_borrower_agreed_at,force_majeure_owner_agreed_at,test_taker_intro,time_window,registry_id,registry_quadrant,registries:registry_id(id,name,city,address,province,postal_code)",
         )
         .eq("owner_id", me)
         .order("created_at", { ascending: false });
@@ -1132,6 +1198,7 @@ const page: React.CSSProperties = { padding: "2rem" };
               <div key={b.id} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 14, marginTop: 10 }}>
                 <div style={{ fontWeight: 600 }}>Booking {shortId(b.id)}</div>
                 <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>scheduled: {fmtDateTime(scheduledIsoFor(b))}</div>
+                <RegistryLocationCard booking={b} />
 
                 {(() => {
                   const intro = (b.test_taker_intro || "").trim();
@@ -1395,6 +1462,7 @@ return (
                   <div style={{ marginTop: 6, color: "#64748b", fontWeight: 600 }}>
                     scheduled: {fmtDateTime(scheduledIsoFor(b))} • bike: {shortId(b.bike_id)}
                   </div>
+                  <RegistryLocationCard booking={b} />
 
                   <div style={{ marginTop: 10, fontWeight: 600, color: "#0f172a", lineHeight: 1.55 }}>
                     Mentor check-in: {ownerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
@@ -1522,6 +1590,8 @@ return (
              })()}
     
                   </div>
+
+                  <RegistryLocationCard booking={b} />
 
                   <div style={{ marginTop: 10, fontWeight: 600, color: "#0f172a", lineHeight: 1.55 }}>
                     Mentor check-in: {ownerChecked ? "✅" : "—"} <span style={{ marginLeft: 10 }} />
@@ -1897,6 +1967,7 @@ return (
                 <tr style={{ textAlign: "left", color: "#0f172a" }}>
                   <th style={{ paddingBottom: 10 }}>Booking</th>
                   <th style={{ paddingBottom: 10 }}>When</th>
+                  <th style={{ paddingBottom: 10 }}>Location</th>
                   <th style={{ paddingBottom: 10 }}>State</th>
                 </tr>
               </thead>
@@ -1910,6 +1981,7 @@ return (
                     <tr key={b.id} style={{ borderTop: "1px solid #e2e8f0" }}>
                       <td style={{ padding: "10px 0", fontWeight: 600 }}>{shortId(b.id)}</td>
                       <td style={{ padding: "10px 0", fontWeight: 600, color: "#334155" }}>{fmtDateTime(whenIso)}</td>
+                      <td style={{ padding: "10px 0", fontWeight: 600, color: "#334155" }}>{registryTitleFor(b)}</td>
                       <td style={{ padding: "10px 0", fontWeight: 600 }}>{state}</td>
                     </tr>
                   );

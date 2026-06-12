@@ -254,24 +254,23 @@ export default function Home() {
         <div style={heroBg}>
           <div style={heroOverlay} />
           <div style={heroInner}>
-            <div style={heroKicker}>Registry road tests only • Safety-first • Structured process</div>
+            <div style={heroKicker}>Registry road tests only • Not a rental • Short scheduled meetups</div>
 
-            <h1 style={h1}>Pass your road test even if you do not own a motorcycle.</h1>
+            <h1 style={h1}>Need a motorcycle for your Class 6 road test?</h1>
 
             <div style={lead}>
-              BorrowMyBike helps connect test-takers with independent mentors who can meet at a registry with a road-test-ready
-              motorcycle. This is for short, controlled registry road tests only.
+              Meet at the registry, use a road-test-ready bike, and return it right after. BorrowMyBike is for short, controlled road test bookings only — not full-day rentals or casual riding.
             </div>
 
             <div style={ctaRow}>
-              <Link to="/test-takers" style={primaryBtn}>
-                I&apos;m taking my road test →
+              <Link to="/browse" style={primaryBtn}>
+                Find a Bike Near You →
+              </Link>
+              <Link to="/test-takers" style={secondaryBtn}>
+                How it works for test-takers →
               </Link>
               <Link to="/mentors/start" style={secondaryBtn}>
-                List your bike • Earn $100 per road-test →
-              </Link>
-              <Link to="/browse" style={secondaryBtn}>
-                Browse bikes →
+                List your bike • Earn $100 →
               </Link>
             </div>
           </div>
@@ -291,8 +290,8 @@ export default function Home() {
   textAlign: "center"
 }}>
              <span>Registry road tests only</span>
-             <span>-  Secure payments via Stripe  -</span>
-             <span>Mentors control bookings</span>
+             <span>-  Short, scheduled handoffs  -</span>
+             <span>Mentors choose what to accept</span>
          </div>
 
         <div style={heroLinksWrap}>
@@ -310,16 +309,16 @@ export default function Home() {
 
       <section style={trustStrip}>
         <div style={trustLeft}>
-          <div style={trustTitle}>Secure payments, payouts, and refunds — powered by Stripe.</div>
+          <div style={trustTitle}>Built for short road-test bookings — not open-ended rentals.</div>
           <div style={trustSub}>
-            Booking payments and deposits are processed securely, and the platform applies the written rules consistently.
+            Requests, payments, deposits, refunds, and status updates run through a structured process so both sides know what to expect.
           </div>
         </div>
 
         <div style={chipRow}>
-          <span style={chip}>Secure payments</span>
-          <span style={chip}>Automatic payouts</span>
-          <span style={chip}>Refund rules enforced</span>
+          <span style={chip}>Registry meetups</span>
+          <span style={chip}>Secure Stripe payments</span>
+          <span style={chip}>Written rules</span>
         </div>
       </section>
 
@@ -389,10 +388,10 @@ export default function Home() {
           <div style={sectionTitle}>How it works</div>
           <ol style={{ margin: "10px 0 0", paddingLeft: 22, ...muted, lineHeight: 1.7 }}>
             <li>
-              <b>Request a booking.</b> Choose a bike and pick your registry during checkout.
+              <b>Request a bike.</b> Choose a road-test-ready bike and pick your registry during checkout.
             </li>
             <li>
-              <b>The mentor reviews it.</b> Mentors can accept or decline any request.
+              <b>The mentor reviews it.</b> Mentors see the request details and can accept or decline based on comfort, schedule, and fit.
             </li>
             <li>
               <b>Meet at the registry.</b> Complete the road test and return the bike right after.
@@ -444,16 +443,15 @@ export default function Home() {
         <div style={card}>
           <div style={smallCardTitle}>For test-takers</div>
           <div style={smallCardText}>
-            Clear steps, practical expectations, and less last-minute stress. Find a road-test-ready bike and coordinate with a
-            mentor before test day.
+            Clear steps, practical expectations, and less last-minute stress. Request a road-test-ready bike for a short registry meetup only.
           </div>
         </div>
 
         <div style={card}>
           <div style={smallCardTitle}>For mentors</div>
           <div style={smallCardText}>
-            Controlled use at the registry, no recreational riding, and full control over whether to accept a request. Earn <strong>$100</strong>
-            for a completed booking.
+            Controlled use at the registry, no recreational riding, and full control over whether to accept a request. Mentors earn <strong>$100</strong>
+            for a completed road-test booking.
           </div>
         </div>
 
@@ -477,7 +475,7 @@ export default function Home() {
               <span>Is this a rental business?</span>
             </summary>
             <div className="bmb-accBody">
-              No. BorrowMyBike is for <b>registry road tests only</b>. No recreational rentals and no joyrides.
+              No. BorrowMyBike is for <b>registry road tests only</b>. The rider uses the bike for the test and brings it right back — no recreational rentals and no joyrides.
             </div>
           </details>
 
